@@ -2,11 +2,13 @@
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
-  User, Settings, Bell, Shield, HelpCircle, Database, Palette
+  User, Bell, Shield, HelpCircle, Database, Palette
 } from 'lucide-react';
-import { Card } from '@/components/ui/card';
 import { ThemeSettings } from './ThemeSettings';
 import { StorageSettings } from './StorageSettings';
+import { ProfileSettings } from './ProfileSettings';
+import { NotificationSettings } from './NotificationSettings';
+import { HelpFAQs } from './HelpFAQs';
 
 export const SettingsTabs = () => {
   return (
@@ -39,17 +41,11 @@ export const SettingsTabs = () => {
       </TabsList>
 
       <TabsContent value="profile">
-        <Card className="neuro border-none p-6">
-          <h3 className="text-xl font-semibold mb-4">Profile Settings</h3>
-          <p className="text-muted-foreground">Manage your account information and preferences.</p>
-        </Card>
+        <ProfileSettings />
       </TabsContent>
 
       <TabsContent value="notifications">
-        <Card className="neuro border-none p-6">
-          <h3 className="text-xl font-semibold mb-4">Notification Settings</h3>
-          <p className="text-muted-foreground">Configure how you want to be notified.</p>
-        </Card>
+        <NotificationSettings />
       </TabsContent>
 
       <TabsContent value="appearance">
@@ -61,17 +57,14 @@ export const SettingsTabs = () => {
       </TabsContent>
 
       <TabsContent value="security">
-        <Card className="neuro border-none p-6">
+        <div className="neuro border-none p-6">
           <h3 className="text-xl font-semibold mb-4">Security Settings</h3>
           <p className="text-muted-foreground">Configure your security preferences.</p>
-        </Card>
+        </div>
       </TabsContent>
 
       <TabsContent value="help">
-        <Card className="neuro border-none p-6">
-          <h3 className="text-xl font-semibold mb-4">Help & FAQs</h3>
-          <p className="text-muted-foreground">Find answers to commonly asked questions.</p>
-        </Card>
+        <HelpFAQs />
       </TabsContent>
     </Tabs>
   );
