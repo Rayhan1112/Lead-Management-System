@@ -10,6 +10,7 @@ import { ProfileSettings } from './ProfileSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { HelpFAQs } from './HelpFAQs';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { Button } from '@/components/ui/button';
 
 export const SettingsTabs = () => {
   const isMobile = useIsMobile();
