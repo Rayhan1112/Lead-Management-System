@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { mockTasks, Task } from '@/lib/mockData';
 import { AssignTaskForm } from './AssignTaskForm';
 import { ReassignTaskForm } from './ReassignTaskForm';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export const TasksTable: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -14,6 +15,7 @@ export const TasksTable: React.FC = () => {
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [isReassigningTask, setIsReassigningTask] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const isMobile = useIsMobile();
 
   const filteredTasks = tasks.filter(task => {
     return task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -53,17 +55,43 @@ export const TasksTable: React.FC = () => {
     toast.success('Task updated successfully');
   };
 
+  const getPriorityClassName = (priority: string) => {
+    switch(priority) {
+      case 'high':
+        return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+      case 'low':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
+    }
+  };
+  
+  const getStatusClassName = (status: string) => {
+    switch(status) {
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+      case 'in_progress':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
+      case 'completed':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Actions and Search */}
-      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
-        <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <Button 
             onClick={() => {
               setSelectedTask(null);
               setIsAddingTask(true);
             }}
-            className="neuro hover:shadow-none transition-all duration-300"
+            className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Task
@@ -75,7 +103,7 @@ export const TasksTable: React.FC = () => {
               setIsReassigningTask(true);
             }}
             variant="outline"
-            className="neuro hover:shadow-none transition-all duration-300"
+            className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
           >
             Assign Lead Range
           </Button>
@@ -89,8 +117,8 @@ export const TasksTable: React.FC = () => {
         />
       </div>
 
-      {/* Tasks Table */}
-      <div className="overflow-auto neuro">
+      {/* Tasks Table - Desktop */}
+      <div className="overflow-auto neuro hidden sm:block">
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-muted/50">
@@ -118,24 +146,12 @@ export const TasksTable: React.FC = () => {
                 <td className="p-3">{task.startDate}</td>
                 <td className="p-3">{task.endDate}</td>
                 <td className="p-3">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    task.priority === 'high' 
-                      ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300' 
-                      : task.priority === 'medium'
-                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
-                      : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
-                  }`}>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityClassName(task.priority)}`}>
                     {task.priority}
                   </span>
                 </td>
                 <td className="p-3">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    task.status === 'pending' 
-                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300' 
-                      : task.status === 'in_progress'
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300'
-                      : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
-                  }`}>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClassName(task.status)}`}>
                     {task.status.replace('_', ' ')}
                   </span>
                 </td>
@@ -171,6 +187,64 @@ export const TasksTable: React.FC = () => {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Tasks Cards - Mobile */}
+      <div className="sm:hidden space-y-4">
+        {filteredTasks.map((task) => (
+          <div key={task.id} className="neuro p-4 rounded-lg">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-medium">{task.title}</h3>
+                <p className="text-sm text-muted-foreground">{task.description}</p>
+              </div>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityClassName(task.priority)}`}>
+                {task.priority}
+              </span>
+            </div>
+            
+            <div className="mt-3 flex flex-col space-y-2">
+              <div className="flex justify-between items-center">
+                <div className="text-sm">Assigned to: <span className="font-medium">{task.agentName}</span></div>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClassName(task.status)}`}>
+                  {task.status.replace('_', ' ')}
+                </span>
+              </div>
+              
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <div>Start: {task.startDate}</div>
+                <div>End: {task.endDate}</div>
+              </div>
+            </div>
+            
+            <div className="mt-3 pt-3 border-t flex justify-end gap-2">
+              <Button 
+                variant="outline"
+                size="sm"
+                className="text-xs h-8"
+                onClick={() => handleReassign(task)}
+              >
+                Reassign
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                onClick={() => handleEdit(task)}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon"
+                className="h-8 w-8 text-red-500 hover:text-red-600"
+                onClick={() => handleDelete(task.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Task Forms */}

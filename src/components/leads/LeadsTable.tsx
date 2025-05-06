@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { mockLeads, statusCounts, Lead } from '@/lib/mockData';
 import { LeadForm } from './LeadForm';
 import { FileManager } from '@/components/common/FileManager';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export const LeadsTable: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,6 +20,7 @@ export const LeadsTable: React.FC = () => {
   const [isAddingLead, setIsAddingLead] = useState(false);
   const [showFileManager, setShowFileManager] = useState(false);
   const [fileManagerMode, setFileManagerMode] = useState<'import' | 'export'>('import');
+  const isMobile = useIsMobile();
 
   const filteredLeads = leads.filter(lead => {
     const matchesSearch = lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -109,19 +111,19 @@ export const LeadsTable: React.FC = () => {
       </div>
 
       {/* Actions and Search */}
-      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
+      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <Button 
             onClick={() => setIsAddingLead(true)}
-            className="neuro hover:shadow-none transition-all duration-300"
+            className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
           >
             Add Lead
           </Button>
           
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 mt-2 sm:mt-0">
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="neuro hover:shadow-none transition-all duration-300">
+                <Button variant="outline" className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto">
                   <Filter className="h-4 w-4 mr-2" />
                   Filter
                 </Button>
@@ -208,8 +210,8 @@ export const LeadsTable: React.FC = () => {
         </div>
       </div>
 
-      {/* Leads Table */}
-      <div className="overflow-auto neuro">
+      {/* Leads Table - Desktop */}
+      <div className="overflow-auto neuro hidden sm:block">
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-muted/50">
@@ -293,6 +295,83 @@ export const LeadsTable: React.FC = () => {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Leads Cards - Mobile */}
+      <div className="sm:hidden space-y-4">
+        {filteredLeads.map((lead) => (
+          <div key={lead.id} className="neuro p-4 rounded-lg">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-medium">{lead.name}</h3>
+                <p className="text-sm text-muted-foreground">{lead.email}</p>
+                <p className="text-sm mt-1">{lead.company}</p>
+              </div>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                lead.status === 'new' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300' :
+                lead.status === 'contacted' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300' :
+                lead.status === 'qualified' ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300' :
+                lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-300' :
+                lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300' :
+                'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300'
+              }`}>
+                {lead.status}
+              </span>
+            </div>
+            
+            <div className="flex flex-wrap items-center mt-2 gap-2 text-sm text-muted-foreground">
+              <div className="mr-4">Source: {lead.source}</div>
+              <div>Added: {lead.createdAt}</div>
+            </div>
+            
+            <div className="mt-3 pt-3 border-t flex justify-between">
+              <div className="flex space-x-3">
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  onClick={() => handleAction('call', lead)}
+                >
+                  <Phone className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  onClick={() => handleAction('email', lead)}
+                >
+                  <Mail className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  onClick={() => handleAction('whatsapp', lead)}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex space-x-2">
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  onClick={() => handleAction('edit', lead)}
+                >
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="h-8 w-8 text-red-500 hover:text-red-600"
+                  onClick={() => handleDelete(lead.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Lead Form Dialog */}

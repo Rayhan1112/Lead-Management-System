@@ -7,12 +7,14 @@ import { toast } from 'sonner';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { mockMeetings, Meeting, mockAgents } from '@/lib/mockData';
 import { MeetingForm } from './MeetingForm';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export const MeetingsTable: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [meetings, setMeetings] = useState(mockMeetings);
   const [isAddingMeeting, setIsAddingMeeting] = useState(false);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const isMobile = useIsMobile();
 
   const filteredMeetings = meetings.filter(meeting => {
     return meeting.title.toLowerCase().includes(searchTerm.toLowerCase());
@@ -60,13 +62,13 @@ export const MeetingsTable: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Actions and Search */}
-      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
+      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
         <Button 
           onClick={() => {
             setSelectedMeeting(null);
             setIsAddingMeeting(true);
           }}
-          className="neuro hover:shadow-none transition-all duration-300"
+          className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
         >
           Schedule Meeting
         </Button>
@@ -79,8 +81,8 @@ export const MeetingsTable: React.FC = () => {
         />
       </div>
 
-      {/* Meetings Table */}
-      <div className="overflow-auto neuro">
+      {/* Meetings Table - Desktop */}
+      <div className="overflow-auto neuro hidden sm:block">
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-muted/50">
@@ -156,6 +158,82 @@ export const MeetingsTable: React.FC = () => {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Meetings Cards - Mobile */}
+      <div className="sm:hidden space-y-4">
+        {filteredMeetings.map((meeting) => (
+          <div key={meeting.id} className="neuro p-4 rounded-lg">
+            <div className="flex justify-between items-start">
+              <h3 className="font-medium">{meeting.title}</h3>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                getStatusClassName(meeting.status)
+              }`}>
+                {meeting.status}
+              </span>
+            </div>
+            
+            <div className="mt-2 space-y-1">
+              <div className="flex justify-between text-sm">
+                <div>Date & Time:</div>
+                <div className="font-medium">{meeting.startDate} @ {meeting.startTime}</div>
+              </div>
+              
+              <div className="flex justify-between text-sm">
+                <div>Duration:</div>
+                <div className="font-medium">{meeting.duration} mins</div>
+              </div>
+              
+              <div className="flex justify-between text-sm">
+                <div>Reminder:</div>
+                <div className="font-medium">{meeting.reminder}</div>
+              </div>
+            </div>
+            
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 text-xs">
+                    <Users className="h-3 w-3 mr-1" />
+                    {meeting.participants.length} participants
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-60 p-0">
+                  <div className="p-4">
+                    <h4 className="font-medium mb-2">Participants</h4>
+                    <ul className="space-y-2">
+                      {getParticipantNames(meeting.participants).map((name, idx) => (
+                        <li key={idx} className="text-sm flex items-center">
+                          <div className="w-2 h-2 rounded-full bg-pulse mr-2"></div>
+                          {name}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+            
+            <div className="mt-3 pt-3 border-t flex justify-end space-x-2">
+              <Button 
+                variant="ghost" 
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                onClick={() => handleEdit(meeting)}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon"
+                className="h-8 w-8 text-red-500 hover:text-red-600"
+                onClick={() => handleDelete(meeting.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Meeting Form Dialog */}
