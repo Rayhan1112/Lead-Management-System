@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { AgentsTable } from '@/components/agents/AgentsTable';
+import { AgentCards } from '@/components/agents/AgentCards';
 import { AuthLayout } from '@/components/AuthLayout';
 
 const Agents: React.FC = () => {
@@ -16,7 +16,7 @@ const Agents: React.FC = () => {
             </p>
           </div>
           
-          <AgentsTable />
+          <AgentCards />
         </div>
       </DashboardLayout>
     </AuthLayout>

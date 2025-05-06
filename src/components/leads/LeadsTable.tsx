@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Phone, Mail, MessageSquare, Edit, Trash2, Filter, Download, Upload } from 'lucide-react';
+import { Phone, Mail, MessageSquare, Edit, Trash2, Filter, Download, Upload, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -9,12 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { mockLeads, statusCounts, Lead } from '@/lib/mockData';
 import { LeadForm } from './LeadForm';
+import { FileManager } from '@/components/common/FileManager';
 
 export const LeadsTable: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [leads, setLeads] = useState(mockLeads);
   const [isAddingLead, setIsAddingLead] = useState(false);
+  const [showFileManager, setShowFileManager] = useState(false);
+  const [fileManagerMode, setFileManagerMode] = useState<'import' | 'export'>('import');
 
   const filteredLeads = leads.filter(lead => {
     const matchesSearch = lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -22,8 +26,9 @@ export const LeadsTable: React.FC = () => {
                         lead.email.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = selectedStatus ? lead.status === selectedStatus : true;
+    const matchesSource = selectedSource ? lead.source === selectedSource : true;
     
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesSource;
   });
 
   const handleDelete = (id: string) => {
@@ -57,13 +62,34 @@ export const LeadsTable: React.FC = () => {
   };
 
   const handleExport = () => {
-    toast.success('Exporting leads to Excel...');
-    // In a real app, this would trigger an actual export
+    setFileManagerMode('export');
+    setShowFileManager(true);
   };
 
   const handleImport = () => {
-    toast.success('Import functionality coming soon');
-    // In a real app, this would trigger a file selector
+    setFileManagerMode('import');
+    setShowFileManager(true);
+  };
+
+  const handleFileManagerClose = (files?: string[]) => {
+    setShowFileManager(false);
+    
+    if (files && files.length > 0) {
+      if (fileManagerMode === 'import') {
+        toast.success(`Imported leads from ${files[0]}`);
+      } else {
+        toast.success(`Exported leads to ${files[0]}`);
+      }
+    }
+  };
+
+  const resetFilters = () => {
+    setSelectedStatus(null);
+    setSelectedSource(null);
+  };
+
+  const applyFilters = () => {
+    toast.success('Filters applied successfully');
   };
 
   return (
@@ -108,7 +134,11 @@ export const LeadsTable: React.FC = () => {
                     <div className="grid grid-cols-2 gap-2">
                       {['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'closed'].map((status) => (
                         <div key={status} className="flex items-center space-x-2">
-                          <Checkbox id={`status-${status}`} />
+                          <Checkbox 
+                            id={`status-${status}`} 
+                            checked={selectedStatus === status}
+                            onCheckedChange={() => setSelectedStatus(selectedStatus === status ? null : status)}
+                          />
                           <label htmlFor={`status-${status}`} className="text-sm capitalize">
                             {status}
                           </label>
@@ -119,11 +149,15 @@ export const LeadsTable: React.FC = () => {
                   
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Source</p>
-                    <Select>
+                    <Select 
+                      value={selectedSource || ''} 
+                      onValueChange={(value) => setSelectedSource(value || null)}
+                    >
                       <SelectTrigger className="w-full neuro-inset focus:shadow-none">
                         <SelectValue placeholder="All sources" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="">All sources</SelectItem>
                         <SelectItem value="website">Website</SelectItem>
                         <SelectItem value="referral">Referral</SelectItem>
                         <SelectItem value="social">Social Media</SelectItem>
@@ -134,8 +168,8 @@ export const LeadsTable: React.FC = () => {
                   </div>
                   
                   <div className="flex justify-between">
-                    <Button variant="outline" size="sm">Reset</Button>
-                    <Button size="sm">Apply Filters</Button>
+                    <Button variant="outline" size="sm" onClick={resetFilters}>Reset</Button>
+                    <Button size="sm" onClick={applyFilters}>Apply Filters</Button>
                   </div>
                 </div>
               </PopoverContent>
@@ -147,6 +181,7 @@ export const LeadsTable: React.FC = () => {
                 size="icon" 
                 className="neuro hover:shadow-none transition-all duration-300"
                 onClick={handleExport}
+                title="Export leads"
               >
                 <Download className="h-4 w-4" />
               </Button>
@@ -155,6 +190,7 @@ export const LeadsTable: React.FC = () => {
                 size="icon" 
                 className="neuro hover:shadow-none transition-all duration-300"
                 onClick={handleImport}
+                title="Import leads"
               >
                 <Upload className="h-4 w-4" />
               </Button>
@@ -261,6 +297,14 @@ export const LeadsTable: React.FC = () => {
 
       {/* Lead Form Dialog */}
       <LeadForm isOpen={isAddingLead} onClose={() => setIsAddingLead(false)} onSubmit={handleAddLead} />
+
+      {/* File Manager Dialog */}
+      <FileManager 
+        isOpen={showFileManager} 
+        onClose={handleFileManagerClose}
+        mode={fileManagerMode}
+        fileType="excel"
+      />
     </div>
   );
 };

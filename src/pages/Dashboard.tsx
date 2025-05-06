@@ -4,10 +4,10 @@ import { useAuth } from '@/context/AuthContext';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { ChartSelector } from '@/components/dashboard/ChartSelector';
-import { Calendar } from '@/components/dashboard/Calendar';
 import { ActionCards } from '@/components/dashboard/ActionCards';
 import { FileText, Users, Phone, Calendar as CalendarIcon } from 'lucide-react';
 import { dashboardStats } from '@/lib/mockData';
+import { EnhancedCalendar } from '@/components/dashboard/EnhancedCalendar';
 
 const Dashboard: React.FC = () => {
   const { isAdmin } = useAuth();
@@ -15,7 +15,7 @@ const Dashboard: React.FC = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <StatCard 
             title="Total Leads" 
             value={dashboardStats.totalLeads}
@@ -59,7 +59,7 @@ const Dashboard: React.FC = () => {
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <ChartSelector className="lg:col-span-2" />
-          <Calendar />
+          <EnhancedCalendar />
         </div>
         
         <ActionCards />

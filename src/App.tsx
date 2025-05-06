@@ -5,7 +5,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthLayout } from "@/components/AuthLayout";
+import { AIAssistant } from "@/components/common/AIAssistant";
 
 // Pages
 import Index from "./pages/Index";
@@ -23,58 +25,64 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/login" element={<Login />} />
+    <ThemeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/login" element={<Login />} />
+              
+              <Route path="/dashboard" element={
+                <AuthLayout>
+                  <Dashboard />
+                </AuthLayout>
+              } />
+              
+              <Route path="/leads" element={
+                <AuthLayout>
+                  <Leads />
+                </AuthLayout>
+              } />
+              
+              <Route path="/agents" element={<Agents />} />
+              
+              <Route path="/tasks" element={
+                <AuthLayout>
+                  <Tasks />
+                </AuthLayout>
+              } />
+              
+              <Route path="/meetings" element={
+                <AuthLayout>
+                  <Meetings />
+                </AuthLayout>
+              } />
+              
+              <Route path="/deals" element={
+                <AuthLayout>
+                  <Deals />
+                </AuthLayout>
+              } />
+              
+              <Route path="/settings" element={
+                <AuthLayout>
+                  <Settings />
+                </AuthLayout>
+              } />
+              
+              <Route path="*" element={<NotFound />} />
+            </Routes>
             
-            <Route path="/dashboard" element={
-              <AuthLayout>
-                <Dashboard />
-              </AuthLayout>
-            } />
+            {/* AI Assistant */}
+            <AIAssistant />
             
-            <Route path="/leads" element={
-              <AuthLayout>
-                <Leads />
-              </AuthLayout>
-            } />
-            
-            <Route path="/agents" element={<Agents />} />
-            
-            <Route path="/tasks" element={
-              <AuthLayout>
-                <Tasks />
-              </AuthLayout>
-            } />
-            
-            <Route path="/meetings" element={
-              <AuthLayout>
-                <Meetings />
-              </AuthLayout>
-            } />
-            
-            <Route path="/deals" element={
-              <AuthLayout>
-                <Deals />
-              </AuthLayout>
-            } />
-            
-            <Route path="/settings" element={
-              <AuthLayout>
-                <Settings />
-              </AuthLayout>
-            } />
-            
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

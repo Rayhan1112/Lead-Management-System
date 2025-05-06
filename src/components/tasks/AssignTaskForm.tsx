@@ -25,6 +25,7 @@ export const AssignTaskForm: React.FC<AssignTaskFormProps> = ({ isOpen, onClose,
       startDate: '',
       endDate: '',
       status: 'pending',
+      priority: 'medium',
     }
   );
 
@@ -64,6 +65,7 @@ export const AssignTaskForm: React.FC<AssignTaskFormProps> = ({ isOpen, onClose,
       startDate: formData.startDate || '',
       endDate: formData.endDate || '',
       status: (formData.status as Task['status']) || 'pending',
+      priority: (formData.priority as 'high' | 'medium' | 'low') || 'medium',
     };
     
     onSubmit(newTask);
@@ -148,22 +150,41 @@ export const AssignTaskForm: React.FC<AssignTaskFormProps> = ({ isOpen, onClose,
               />
             </div>
           </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="status">Status</Label>
-            <Select 
-              defaultValue={formData.status}
-              onValueChange={(value) => handleSelectChange('status', value)}
-            >
-              <SelectTrigger className="neuro-inset focus:shadow-none">
-                <SelectValue placeholder="Select status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="in_progress">In Progress</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-              </SelectContent>
-            </Select>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="priority">Priority</Label>
+              <Select 
+                defaultValue={formData.priority}
+                onValueChange={(value) => handleSelectChange('priority', value)}
+              >
+                <SelectTrigger className="neuro-inset focus:shadow-none">
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <Select 
+                defaultValue={formData.status}
+                onValueChange={(value) => handleSelectChange('status', value)}
+              >
+                <SelectTrigger className="neuro-inset focus:shadow-none">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           
           <DialogFooter>
