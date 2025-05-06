@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { User, Camera, Mail, Phone } from 'lucide-react';
+import { User, Camera, Mail, Phone, Lock, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 export const ProfileSettings: React.FC = () => {
@@ -18,7 +18,12 @@ export const ProfileSettings: React.FC = () => {
     phone: '123-456-7890', // Example placeholder
     avatar: user?.avatar || '/placeholder.svg',
     bio: 'CRM professional with 5+ years of experience managing client relationships.',
+    password: '',
+    confirmPassword: ''
   });
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -29,6 +34,10 @@ export const ProfileSettings: React.FC = () => {
   };
 
   const handleSave = () => {
+    if (formData.password && formData.password !== formData.confirmPassword) {
+      toast.error("Passwords don't match!");
+      return;
+    }
     // In a real application, this would update the user profile in the backend
     toast.success('Profile updated successfully');
   };
@@ -36,6 +45,14 @@ export const ProfileSettings: React.FC = () => {
   const handleAvatarChange = () => {
     // This would trigger a file upload in a real application
     toast.info('Avatar upload functionality would open here');
+  };
+
+  const togglePasswordVisibility = (field: 'password' | 'confirmPassword') => {
+    if (field === 'password') {
+      setShowPassword(!showPassword);
+    } else {
+      setShowConfirmPassword(!showConfirmPassword);
+    }
   };
 
   return (
@@ -118,6 +135,58 @@ export const ProfileSettings: React.FC = () => {
             rows={4}
             className="w-full neuro-inset p-3 rounded-md focus:shadow-none focus:outline-none resize-none"
           />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="password" className="flex items-center gap-2">
+              <Lock className="h-4 w-4" />
+              Password
+            </Label>
+            <div className="relative">
+              <Input 
+                id="password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                value={formData.password}
+                onChange={handleChange}
+                className="neuro-inset focus:shadow-none pr-10"
+                placeholder="Enter new password"
+              />
+              <button 
+                type="button"
+                onClick={() => togglePasswordVisibility('password')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword" className="flex items-center gap-2">
+              <Lock className="h-4 w-4" />
+              Confirm Password
+            </Label>
+            <div className="relative">
+              <Input 
+                id="confirmPassword"
+                name="confirmPassword"
+                type={showConfirmPassword ? "text" : "password"}
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                className="neuro-inset focus:shadow-none pr-10"
+                placeholder="Confirm new password"
+              />
+              <button 
+                type="button"
+                onClick={() => togglePasswordVisibility('confirmPassword')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
         </div>
       </CardContent>
       

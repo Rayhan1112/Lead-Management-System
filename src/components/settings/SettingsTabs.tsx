@@ -9,36 +9,56 @@ import { StorageSettings } from './StorageSettings';
 import { ProfileSettings } from './ProfileSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { HelpFAQs } from './HelpFAQs';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export const SettingsTabs = () => {
+  const isMobile = useIsMobile();
+  
   return (
     <Tabs defaultValue="profile" className="space-y-4">
-      <TabsList className="neuro border-none h-auto flex-wrap">
-        <TabsTrigger value="profile" className="data-[state=active]:neuro-inset py-2 px-4">
+      <TabsList className={`neuro border-none h-auto ${isMobile ? 'flex flex-wrap' : 'grid grid-cols-6'}`}>
+        <TabsTrigger value="profile" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <User className="h-4 w-4 mr-2" />
-          Profile
+          {isMobile ? '' : 'Profile'}
         </TabsTrigger>
-        <TabsTrigger value="notifications" className="data-[state=active]:neuro-inset py-2 px-4">
+        <TabsTrigger value="notifications" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <Bell className="h-4 w-4 mr-2" />
-          Notifications
+          {isMobile ? '' : 'Notifications'}
         </TabsTrigger>
-        <TabsTrigger value="appearance" className="data-[state=active]:neuro-inset py-2 px-4">
+        <TabsTrigger value="appearance" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <Palette className="h-4 w-4 mr-2" />
-          Appearance
+          {isMobile ? '' : 'Appearance'}
         </TabsTrigger>
-        <TabsTrigger value="storage" className="data-[state=active]:neuro-inset py-2 px-4">
+        <TabsTrigger value="storage" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <Database className="h-4 w-4 mr-2" />
-          Storage
+          {isMobile ? '' : 'Storage'}
         </TabsTrigger>
-        <TabsTrigger value="security" className="data-[state=active]:neuro-inset py-2 px-4">
+        <TabsTrigger value="security" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <Shield className="h-4 w-4 mr-2" />
-          Security
+          {isMobile ? '' : 'Security'}
         </TabsTrigger>
-        <TabsTrigger value="help" className="data-[state=active]:neuro-inset py-2 px-4">
+        <TabsTrigger value="help" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <HelpCircle className="h-4 w-4 mr-2" />
-          Help & FAQs
+          {isMobile ? '' : 'Help & FAQs'}
         </TabsTrigger>
       </TabsList>
+
+      {isMobile && (
+        <div className="mb-2 text-center">
+          <h2 className="text-sm font-medium">
+            {
+              {
+                'profile': 'Profile Settings',
+                'notifications': 'Notification Settings',
+                'appearance': 'Appearance Settings',
+                'storage': 'Storage Settings',
+                'security': 'Security Settings',
+                'help': 'Help & FAQs'
+              }[document.querySelector('[data-state="active"][data-orientation="horizontal"]')?.getAttribute('value') || 'profile']
+            }
+          </h2>
+        </div>
+      )}
 
       <TabsContent value="profile">
         <ProfileSettings />
@@ -60,6 +80,32 @@ export const SettingsTabs = () => {
         <div className="neuro border-none p-6">
           <h3 className="text-xl font-semibold mb-4">Security Settings</h3>
           <p className="text-muted-foreground">Configure your security preferences.</p>
+          
+          <div className="mt-6 space-y-4">
+            <div className="flex items-center justify-between p-4 neuro-inset rounded-md">
+              <div>
+                <h4 className="font-medium">Two-Factor Authentication</h4>
+                <p className="text-sm text-muted-foreground">Add an extra layer of security to your account</p>
+              </div>
+              <Button variant="outline" className="neuro">Enable</Button>
+            </div>
+
+            <div className="flex items-center justify-between p-4 neuro-inset rounded-md">
+              <div>
+                <h4 className="font-medium">Login History</h4>
+                <p className="text-sm text-muted-foreground">View your recent login activity</p>
+              </div>
+              <Button variant="outline" className="neuro">View</Button>
+            </div>
+
+            <div className="flex items-center justify-between p-4 neuro-inset rounded-md">
+              <div>
+                <h4 className="font-medium">Active Sessions</h4>
+                <p className="text-sm text-muted-foreground">Manage your active sessions</p>
+              </div>
+              <Button variant="outline" className="neuro">Manage</Button>
+            </div>
+          </div>
         </div>
       </TabsContent>
 
