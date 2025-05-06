@@ -1,4 +1,3 @@
-
 import { format, addDays, subDays } from 'date-fns';
 
 export interface Lead {
@@ -22,6 +21,7 @@ export interface Agent {
   assignedLeads: number;
   status: 'active' | 'inactive';
   createdAt: string;
+  avatar?: string; // Added avatar property
 }
 
 export interface Task {
@@ -33,6 +33,7 @@ export interface Task {
   startDate: string;
   endDate: string;
   status: 'pending' | 'in_progress' | 'completed';
+  priority: 'high' | 'medium' | 'low'; // Added priority property
 }
 
 export interface Meeting {
@@ -55,6 +56,8 @@ export interface Deal {
   status: 'proposal' | 'negotiation' | 'closed_won' | 'closed_lost';
   createdAt: string;
   closingDate: string;
+  company: string; // Added company property
+  description?: string; // Added description property
 }
 
 export const statusCounts = {
@@ -103,6 +106,7 @@ export const generateAgents = (count: number): Agent[] => {
 
 export const generateTasks = (count: number): Task[] => {
   const statuses: Task['status'][] = ['pending', 'in_progress', 'completed'];
+  const priorities: Task['priority'][] = ['high', 'medium', 'low']; // Added priorities
   
   return Array.from({ length: count }, (_, i) => {
     const startDate = format(addDays(new Date(), Math.floor(Math.random() * 10) - 5), 'yyyy-MM-dd');
@@ -116,6 +120,7 @@ export const generateTasks = (count: number): Task[] => {
       startDate,
       endDate: format(addDays(new Date(startDate), Math.floor(Math.random() * 5) + 1), 'yyyy-MM-dd'),
       status: statuses[Math.floor(Math.random() * statuses.length)],
+      priority: priorities[Math.floor(Math.random() * priorities.length)], // Added priority
     };
   });
 };
@@ -155,12 +160,17 @@ export const generateDeals = (count: number): Deal[] => {
       status: statuses[Math.floor(Math.random() * statuses.length)],
       createdAt,
       closingDate: format(addDays(new Date(createdAt), Math.floor(Math.random() * 30) + 15), 'yyyy-MM-dd'),
+      company: `Company ${Math.floor(Math.random() * 20) + 1}`, // Added company
+      description: Math.random() > 0.3 ? `Description for deal ${i + 1}` : undefined, // Added description
     };
   });
 };
 
 export const mockLeads = generateLeads(20);
-export const mockAgents = generateAgents(5);
+export const mockAgents = generateAgents(5).map((agent, index) => ({
+  ...agent,
+  avatar: index % 2 === 0 ? `/images/avatar-${index + 1}.png` : undefined // Added avatar urls
+}));
 export const mockTasks = generateTasks(10);
 export const mockMeetings = generateMeetings(8);
 export const mockDeals = generateDeals(12);

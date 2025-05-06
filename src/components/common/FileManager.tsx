@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { File, FileText, FileImage, Upload, Download, X } from 'lucide-react';
+import { File, FileText, FileImage, Upload, Download, X, Check } from 'lucide-react'; // Added Check import
 import { toast } from 'sonner';
 
 interface FileManagerProps {
