@@ -10,7 +10,7 @@ import { AgentForm } from './AgentForm';
 
 export const AgentCards: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [agents, setAgents] = useState(mockAgents);
+  const [agents, setAgents] = useState<Agent[]>(mockAgents);
   const [isAddingAgent, setIsAddingAgent] = useState(false);
 
   const filteredAgents = agents.filter(agent => {

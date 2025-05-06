@@ -24,6 +24,7 @@ export const DealForm: React.FC<DealFormProps> = ({ isOpen, onClose, onSubmit, d
       amount: 0,
       status: 'proposal',
       closingDate: '',
+      company: '', // Added company field
     }
   );
 
@@ -41,6 +42,17 @@ export const DealForm: React.FC<DealFormProps> = ({ isOpen, onClose, onSubmit, d
       ...formData,
       [field]: value,
     });
+
+    // If selecting a lead, auto-fill the company name
+    if (field === 'leadId') {
+      const selectedLead = mockLeads.find(lead => lead.id === value);
+      if (selectedLead) {
+        setFormData(prev => ({
+          ...prev,
+          company: selectedLead.company
+        }));
+      }
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -55,6 +67,8 @@ export const DealForm: React.FC<DealFormProps> = ({ isOpen, onClose, onSubmit, d
       status: (formData.status as Deal['status']) || 'proposal',
       createdAt: deal?.createdAt || format(new Date(), 'yyyy-MM-dd'),
       closingDate: formData.closingDate || '',
+      company: formData.company || '', // Added company field
+      description: formData.description // Added description field
     };
     
     onSubmit(newDeal);
@@ -154,6 +168,18 @@ export const DealForm: React.FC<DealFormProps> = ({ isOpen, onClose, onSubmit, d
               </Select>
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="company">Company</Label>
+            <Input
+              id="company"
+              name="company"
+              className="neuro-inset focus:shadow-none"
+              value={formData.company}
+              onChange={handleChange}
+              required
+            />
+          </div>
           
           <div className="space-y-2">
             <Label htmlFor="closingDate">Expected Closing Date</Label>
@@ -165,6 +191,17 @@ export const DealForm: React.FC<DealFormProps> = ({ isOpen, onClose, onSubmit, d
               value={formData.closingDate}
               onChange={handleChange}
               required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Input
+              id="description"
+              name="description"
+              className="neuro-inset focus:shadow-none"
+              value={formData.description || ''}
+              onChange={handleChange}
             />
           </div>
           
