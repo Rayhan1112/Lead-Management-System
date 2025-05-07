@@ -4,7 +4,7 @@ import { LoginForm } from '@/components/LoginForm';
 
 const Login: React.FC = () => {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-secondary to-background p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-secondary to-background p-4 overflow-hidden">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="h-16 w-16 bg-pulse rounded-full mx-auto mb-4 flex items-center justify-center">

@@ -8,7 +8,7 @@ export const MobileNavBar: React.FC = () => {
   const { isAdmin } = useAuth();
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border h-16 flex items-center justify-around z-50 md:hidden">
+    <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border h-16 flex items-center justify-around z-50 md:hidden w-full">
       <NavLink 
         to="/dashboard" 
         className={({ isActive }) => `flex flex-col items-center justify-center w-1/5 h-full ${
