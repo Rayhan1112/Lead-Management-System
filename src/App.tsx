@@ -20,6 +20,7 @@ import Meetings from "./pages/Meetings";
 import Deals from "./pages/Deals";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import SignupForm from "./components/SignupForm";
 
 const queryClient = new QueryClient();
 
@@ -34,6 +35,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<SignupForm />}/>
               
               <Route path="/dashboard" element={
                 <AuthLayout>

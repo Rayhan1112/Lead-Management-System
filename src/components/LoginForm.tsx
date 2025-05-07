@@ -1,10 +1,10 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 
 export const LoginForm: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -12,14 +12,19 @@ export const LoginForm: React.FC = () => {
   const [role, setRole] = useState<'admin' | 'agent'>('admin');
   const { login } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       toast.error('Please enter email and password');
       return;
     }
-    login(email, password, role);
-    toast.success(`Logged in as ${role}`);
+    
+    try {
+      await login(email, password);
+      toast.success(`Logged in successfully`);
+    } catch (error: any) {
+      toast.error(error.message || 'Login failed');
+    }
   };
 
   return (
@@ -49,6 +54,7 @@ export const LoginForm: React.FC = () => {
                   className="neuro-inset focus:shadow-none"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  required
                 />
               </div>
               
@@ -61,6 +67,7 @@ export const LoginForm: React.FC = () => {
                   className="neuro-inset focus:shadow-none"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  required
                 />
               </div>
             </div>
@@ -68,6 +75,13 @@ export const LoginForm: React.FC = () => {
             <Button type="submit" className="w-full neuro hover:shadow-none transition-all duration-300">
               Login as Admin
             </Button>
+            
+            <p className="text-sm text-center text-muted-foreground">
+              Don't have an account?{' '}
+              <Link to="/signup" className="text-pulse hover:underline">
+                Sign up
+              </Link>
+            </p>
           </form>
         </TabsContent>
         
@@ -90,6 +104,7 @@ export const LoginForm: React.FC = () => {
                   className="neuro-inset focus:shadow-none"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  required
                 />
               </div>
               
@@ -102,6 +117,7 @@ export const LoginForm: React.FC = () => {
                   className="neuro-inset focus:shadow-none"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  required
                 />
               </div>
             </div>
@@ -109,6 +125,13 @@ export const LoginForm: React.FC = () => {
             <Button type="submit" className="w-full neuro hover:shadow-none transition-all duration-300">
               Login as Agent
             </Button>
+            
+            <p className="text-sm text-center text-muted-foreground">
+              Don't have an account?{' '}
+              <Link to="/signup" className="text-pulse hover:underline">
+                Sign up
+              </Link>
+            </p>
           </form>
         </TabsContent>
       </Tabs>
