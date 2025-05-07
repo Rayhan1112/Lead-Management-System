@@ -9,7 +9,7 @@ const Leads: React.FC = () => {
   
   return (
     <DashboardLayout>
-      <div className="space-y-4 sm:space-y-6">
+      <div className="space-y-4 sm:space-y-6 max-w-full overflow-x-hidden">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Lead Management</h1>
           <p className="text-sm sm:text-base text-muted-foreground">

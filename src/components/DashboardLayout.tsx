@@ -19,6 +19,8 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { NotificationDropdown } from '@/components/dashboard/NotificationDropdown';
+import { MobileNavBar } from '@/components/mobile/MobileNavBar';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -28,6 +30,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   const adminMenuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
@@ -56,7 +59,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
       <aside 
         className={`fixed inset-y-0 left-0 z-50 w-64 transform bg-background border-r border-border transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        } md:block hidden`}
       >
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between p-4">
@@ -132,7 +135,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
               variant="ghost"
               size="icon"
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden text-muted-foreground hover:text-foreground"
+              className="md:hidden text-muted-foreground hover:text-foreground"
               aria-label="Open sidebar"
             >
               <Menu size={20} />
@@ -175,9 +178,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
         </header>
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6 pb-20 md:pb-6">
           {children}
         </main>
+        
+        {/* Mobile Bottom Navigation */}
+        <MobileNavBar />
       </div>
     </div>
   );

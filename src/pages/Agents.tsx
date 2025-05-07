@@ -8,10 +8,10 @@ const Agents: React.FC = () => {
   return (
     <AuthLayout requiredRole="admin">
       <DashboardLayout>
-        <div className="space-y-6">
+        <div className="space-y-6 max-w-full overflow-x-hidden">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Agent Management</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Agent Management</h1>
+            <p className="text-sm sm:text-base text-muted-foreground">
               Add, remove, and manage your team of agents.
             </p>
           </div>

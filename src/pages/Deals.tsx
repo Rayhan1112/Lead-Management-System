@@ -6,10 +6,10 @@ import { DealsTable } from '@/components/deals/DealsTable';
 const Deals: React.FC = () => {
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-full overflow-x-hidden">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Deal Management</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Deal Management</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">
             Track and manage your sales pipeline and deals.
           </p>
         </div>
