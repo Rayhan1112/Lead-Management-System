@@ -21,7 +21,8 @@ export interface Agent {
   assignedLeads: number;
   status: 'active' | 'inactive';
   createdAt: string;
-  avatar?: string; // Added avatar property
+  avatar?: string;
+  birthDate: string; // Added birthDate property to fix the error
 }
 
 export interface Task {
@@ -100,7 +101,8 @@ export const generateAgents = (count: number): Agent[] => {
     role: roles[Math.floor(Math.random() * roles.length)],
     assignedLeads: Math.floor(Math.random() * 15),
     status: statuses[Math.floor(Math.random() * statuses.length)],
-    createdAt: format(subDays(new Date(), Math.floor(Math.random() * 60)), 'yyyy-MM-dd')
+    createdAt: format(subDays(new Date(), Math.floor(Math.random() * 60)), 'yyyy-MM-dd'),
+    birthDate: format(subDays(new Date(), Math.floor(Math.random() * 365 * 30)), 'yyyy-MM-dd'), // Added default birthDate
   }));
 };
 
