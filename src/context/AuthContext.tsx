@@ -133,7 +133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (firstName: string, lastName: string, email: string, password: string, role: UserRole) => {
+  const signup = async (firstName: string, lastName: string, email: string, password: string, role: UserRole,leadLimit:string,agentLimit:string) => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
@@ -143,7 +143,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastName,
         email,
         role,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        leadLimit,
+        agentLimit
+
+        
       });
 
       setUser({

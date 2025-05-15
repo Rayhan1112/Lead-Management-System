@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
+import Swal from 'sweetalert2';
+
 
 export const SignupForm: React.FC = () => {
   const [firstName, setFirstName] = useState('');
@@ -33,15 +35,32 @@ export const SignupForm: React.FC = () => {
     }
     
     try {
-      await signup(firstName, lastName, email, password, role);
-      toast.success('Account created successfully!');
+      // Default limits
+      const leadLimit = 500;
+      const agentLimit = role === 'admin' ? 2 : 0; // Only admins get agent limit
+      
+      await signup(
+        firstName, 
+        lastName, 
+        email, 
+        password, 
+        role,
+        leadLimit,
+        agentLimit
+      );
+      Swal.fire({
+        title: 'Admin Created Sucessfully!',
+        text: 'Account Created',
+        icon: 'success',
+        confirmButtonText: 'OK'
+      });
     } catch (error: any) {
       toast.error(error.message || 'Signup failed');
     }
   };
 
   return (
-    <div className="w-full max-w-md">
+    <div className="flex items-center justify-center min-h-screen">
       <form onSubmit={handleSubmit} className="neuro p-6 space-y-6">
         <div className="space-y-2 text-center">
           <h2 className="text-2xl font-bold text-pulse">Create an Account</h2>
@@ -114,28 +133,7 @@ export const SignupForm: React.FC = () => {
               required
             />
           </div>
-          
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Account Type</label>
-            <div className="flex gap-4">
-              <Button
-                type="button"
-                variant={role === 'admin' ? 'default' : 'outline'}
-                className="w-full"
-                onClick={() => setRole('admin')}
-              >
-                Admin
-              </Button>
-              <Button
-                type="button"
-                variant={role === 'agent' ? 'default' : 'outline'}
-                className="w-full"
-                onClick={() => setRole('agent')}
-              >
-                Agent
-              </Button>
-            </div>
-          </div>
+        
         </div>
         
         <Button type="submit" className="w-full neuro hover:shadow-none transition-all duration-300">

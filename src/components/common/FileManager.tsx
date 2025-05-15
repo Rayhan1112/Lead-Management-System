@@ -1,9 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { File, FileText, FileImage, Upload, Download, X, Check } from 'lucide-react'; // Added Check import
 import { toast } from 'sonner';
+import { get, ref } from 'firebase/database';
+import { database } from '../../firebase'; // Adjust import path as needed
+
 
 interface FileManagerProps {
   isOpen: boolean;
@@ -34,6 +37,43 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose, mode,
   const [files, setFiles] = useState<FileItem[]>(mockFiles);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [leadLimitReached, setLeadLimitReached] = useState<boolean>(false);
+  const [currentLeadCount, setCurrentLeadCount] = useState<number>(0);
+  const [leadLimit, setLeadLimit] = useState<number>(0);
+  // Check lead limits when dialog opens
+  useEffect(() => {
+    if (isOpen && mode === 'import' && fileType === 'excel') {
+      checkLeadLimits();
+    }
+  }, [isOpen, mode, fileType]);
+
+  const checkLeadLimits = async () => {
+    try {
+      const adminId = localStorage.getItem('adminKey');
+      if (!adminId) {
+        toast.error('Authentication required');
+        onClose();
+        return;
+      }
+
+      const leadLimit = parseInt(localStorage.getItem('leadLimit') || 0);
+      const leadsRef = ref(database, `users/${adminId}/leads`);
+      
+      const snapshot = await get(leadsRef);
+      const currentCount = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+
+      setCurrentLeadCount(currentCount);
+      setLeadLimit(leadLimit);
+      setLeadLimitReached(leadLimit > 0 && currentCount >= leadLimit);
+
+      if (leadLimit > 0 && currentCount >= leadLimit) {
+        toast.error(`Lead limit reached (${currentCount}/${leadLimit}). Please upgrade your plan.`);
+      }
+    } catch (error) {
+      console.error('Error checking lead limits:', error);
+      toast.error('Failed to check lead limits');
+    }
+  };
 
   const filteredFiles = fileType === 'all' 
     ? files 
@@ -54,6 +94,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose, mode,
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (mode === 'import' && fileType === 'excel' && leadLimitReached) {
+      toast.error(`Cannot import leads - limit reached (${currentLeadCount}/${leadLimit})`);
+      return;
+    }
+
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
 
@@ -108,7 +153,13 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose, mode,
 
   return (
     <Dialog open={isOpen} onOpenChange={() => onClose()}>
-      <DialogContent className="sm:max-w-[600px] neuro border-none">
+    <DialogContent className="sm:max-w-[600px] neuro border-none">
+      {/* Rest of your existing dialog content */}
+      {mode === 'import' && fileType === 'excel' && (
+        <div className="text-xs text-muted-foreground mb-2 text-center">
+          Current leads: {currentLeadCount}/{leadLimit}
+        </div>
+      )}
         <DialogHeader>
           <DialogTitle>
             {mode === 'import' ? 'Import Files' : 'Export Data'}

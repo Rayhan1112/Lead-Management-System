@@ -99,6 +99,8 @@ export const LoginForm: React.FC = () => {
         let userFound = false;
         let userRole = '';
         let adminId = '';
+        let agentLimit = 0;
+        let leadLimit = 0;
 
         for (const [dbAdminId, adminData] of Object.entries(users)) {
           const admin = adminData as any;
@@ -106,6 +108,8 @@ export const LoginForm: React.FC = () => {
           if (dbAdminId === user.uid) {
             userRole = 'admin';
             adminId = dbAdminId;
+            agentLimit = admin.agentLimit || 0;
+            leadLimit = admin.leadLimit || 0;
             userFound = true;
             break;
           }
@@ -115,6 +119,9 @@ export const LoginForm: React.FC = () => {
               if (agentId === user.uid) {
                 userRole = 'agent';
                 adminId = dbAdminId;
+                // Get admin's limits for agent reference
+                agentLimit = admin.agentLimit || 0;
+                leadLimit = admin.leadLimit || 0;
                 userFound = true;
                 break;
               }
@@ -133,10 +140,15 @@ export const LoginForm: React.FC = () => {
           throw new Error(`Please login as ${userRole} instead of ${role}`);
         }
 
+        // Store all relevant data in localStorage
         localStorage.setItem('adminKey', adminId);
+        localStorage.setItem('agentLimit', agentLimit.toString());
+        localStorage.setItem('leadLimit', leadLimit.toString());
+        console.log(agentLimit.toLocaleString());
+        console.log(leadLimit.toLocaleString());
+        
         if (userRole === 'admin') {
           localStorage.removeItem('agentKey');
-          
           toast.success('Welcome back, Admin!');
         } else {
           localStorage.setItem('agentKey', user.uid);

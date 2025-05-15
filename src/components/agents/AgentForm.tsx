@@ -42,6 +42,8 @@ const generateYears = (from: number, to: number) => {
 
 export const AgentForm: React.FC<AgentFormProps> = ({ isOpen, onClose, onSubmit, agent }) => {
   const { user } = useAuth();
+  const currentUser = localStorage.getItem('adminkey');
+
   const [formData, setFormData] = useState<Partial<Agent> & { password?: string; confirmPassword?: string }>({
     name: '',
     email: '',
@@ -115,8 +117,9 @@ export const AgentForm: React.FC<AgentFormProps> = ({ isOpen, onClose, onSubmit,
     }
   };
 
-  const adminId = localStorage.getItem('adminKey')
-
+  const adminId = localStorage.getItem('role') === 'agent' 
+  ? localStorage.getItem('adminKey')
+  : currentUser;
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
   
@@ -145,36 +148,63 @@ export const AgentForm: React.FC<AgentFormProps> = ({ isOpen, onClose, onSubmit,
   
     try {
       // ✅ Step 1: Check agent limit
+      console.log('[Agent Limit Check] Starting process...');
+      console.log(`[Agent Limit Check] Admin ID: ${adminId}`);
+      
       const agentLimitRef = ref(database, `users/${adminId}/agentLimit`);
       const agentsRef = ref(database, `users/${adminId}/agents`);
-  
+      
+      console.log('[Agent Limit Check] References created:', {
+        agentLimitRef,
+        agentsRef
+      });
+
+      console.log('[Agent Limit Check] Fetching data from Firebase...');
       const [limitSnap, agentsSnap] = await Promise.all([
         get(agentLimitRef),
         get(agentsRef),
       ]);
-  
+      
+      console.log('[Agent Limit Check] Snapshots received:', {
+        limitSnap: limitSnap.exists(),
+        agentsSnap: agentsSnap.exists()
+      });
+
       const agentLimit = limitSnap.exists() ? Number(limitSnap.val()) : 0;
       const currentAgentCount = agentsSnap.exists() ? Object.keys(agentsSnap.val()).length : 0;
-  
-      if (!agent && currentAgentCount >= agentLimit) {
+      
+      console.log('[Agent Limit Check] Values:', {
+        agentLimit,
+        currentAgentCount
+      });
+
+      if (currentAgentCount >= agentLimit) {
+        console.log('[Agent Limit Check] Limit reached!', {
+          current: currentAgentCount,
+          limit: agentLimit
+        });
         setIsSubmitting(false);
-        // 🔥 Show PlanModal here
         setShowModal(true);
-        onClose()
+        onClose();
         return;
       }
-  
+
+      console.log('[Agent Limit Check] Within limit, proceeding with agent creation...');
+
       let authUid = agent?.authUid;
   
       if (!agent) {
         try {
+          console.log('[Auth] Creating new user account...');
           const userCredential = await createUserWithEmailAndPassword(
             auth,
             formData.email,
             formData.password
           );
           authUid = userCredential.user.uid;
+          console.log('[Auth] User created with UID:', authUid);
         } catch (authError) {
+          console.error('[Auth] Error creating user:', authError);
           let errorMessage = 'Failed to create agent account';
           if (authError instanceof Error) {
             if (authError.message.includes('email-already-in-use')) {
@@ -191,7 +221,8 @@ export const AgentForm: React.FC<AgentFormProps> = ({ isOpen, onClose, onSubmit,
       }
   
       const agentId = authUid;
-  
+      console.log('[Agent] Preparing agent data with ID:', agentId);
+
       const newAgent: Agent = {
         id: agentId,
         authUid: authUid,
@@ -206,21 +237,23 @@ export const AgentForm: React.FC<AgentFormProps> = ({ isOpen, onClose, onSubmit,
         lastUpdated: format(new Date(), 'yyyy-MM-dd')
       };
   
+      console.log('[Agent] Saving to database at path:', `users/${user.id}/agents/${agentId}`);
       const userAgentRef = ref(database, `users/${user.id}/agents/${agentId}`);
       await set(userAgentRef, newAgent);
   
       toast.success(`Agent ${agent ? 'updated' : 'created'} successfully`);
+      console.log('[Agent] Operation completed successfully');
       onSubmit(newAgent);
       onClose();
     } catch (error) {
-      console.error('Error saving agent:', error);
+      console.error('[Error] Failed to process agent:', error);
       if (!authError) {
         toast.error(`Failed to ${agent ? 'update' : 'create'} agent`);
       }
     } finally {
       setIsSubmitting(false);
     }
-  };
+};
   
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

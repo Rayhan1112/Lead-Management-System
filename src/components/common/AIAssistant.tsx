@@ -6,7 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Mic, Send, X, UploadCloud, Trash2, Edit, Plus, Mail, Phone, MessageSquare, ChevronDown } from 'lucide-react';
+import { Mic, Send, X, UploadCloud, Trash2, Edit, Plus, Mail, Phone, MessageSquare, ChevronDown, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeadForm } from '../leads/LeadForm';
 import { FileManager } from '@/components/common/FileManager';
@@ -109,13 +109,89 @@ export const AIAssistant: React.FC = () => {
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [showLeadsTable, setShowLeadsTable] = useState(false);
+  const [showStatusModal, setShowStatusModal] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [leadRanges, setLeadRanges] = useState<Record<string, { from: string; to: string }>>({});
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const currentUser = localStorage.getItem('adminkey');
+  const adminId = localStorage.getItem('adminkey');
+  const [leadCount, setLeadCount] = useState<number>(0);
+  const [agentCount, setAgentCount] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  // console.log(leadCount,agentCount)
+  const agentLimit = parseInt(localStorage.getItem('agentLimit') || 0);
+  const leadLimit = parseInt(localStorage.getItem('leadLimit') || 0);
+  // console.log(agentCount,leadLimit)
+
+  // For Checking the count and Limit
+  useEffect(() => {
+    if (!adminId) {
+      setError('Admin ID not found');
+      setLoading(false);
+      return;
+    }
+
+    // Reference to leads and agents in Firebase
+    const leadsRef = ref(database, `users/${adminId}/leads`);
+    const agentsRef = ref(database, `users/${adminId}/agents`);
+
+    // Fetch lead count
+    const leadListener = onValue(leadsRef, (snapshot) => {
+      try {
+        // console.log('[Leads] Snapshot:', snapshot.val());
+        const leads = snapshot.val();
+        const count = leads ? Object.keys(leads).length : 0;
+        setLeadCount(count);
+        // console.log(`[Leads] Current count: ${count}`);
+      } catch (err) {
+        console.error('[Leads] Error:', err);
+        setError('Failed to fetch leads');
+      }
+    }, (error) => {
+      console.error('[Leads] Listener error:', error);
+      setError('Failed to listen for leads');
+    });
+
+    // Fetch agent count
+    const agentListener = onValue(agentsRef, (snapshot) => {
+      try {
+        // console.log('[Agents] Snapshot:', snapshot.val());
+        const agents = snapshot.val();
+        const count = agents ? Object.keys(agents).length : 0;
+        setAgentCount(count);
+        // console.log(`[Agents] Current count: ${count}`);
+      } catch (err) {
+        // console.error('[Agents] Error:', err);
+        setError('Failed to fetch agents');
+      }
+    }, (error) => {
+      // console.error('[Agents] Listener error:', error);
+      setError('Failed to listen for agents');
+    });
+
+    setLoading(false);
+
+    // Cleanup listeners on unmount
+    return () => {
+      leadListener();
+      agentListener();
+    };
+  }, [adminId]);
+
+  // Log the limits from localStorage
+  useEffect(() => {
+    const agentLimit = parseInt(localStorage.getItem('agentLimit') || 0);
+    const leadLimit = parseInt(localStorage.getItem('leadLimit') || 0);
+    console.log(`[Limits] Agent Limit: ${agentLimit}, Lead Limit: ${leadLimit}`);
+  }, []);
+
+
+
 
   useEffect(() => {
     if (!currentUser) return;
@@ -247,8 +323,8 @@ export const AIAssistant: React.FC = () => {
         showImportOptions();
       }
       else if (command.includes('list') || command.includes('show') || command.includes('all leads')) {
-        if (command.includes('status')) {
-          showLeadStatusOptions();
+        if (command.includes('status') || command.includes('statistics')) {
+          showLeadStatusStats();
         } else {
           showLeadList();
           setShowLeadsTable(true);
@@ -478,6 +554,39 @@ export const AIAssistant: React.FC = () => {
     }));
 
     setMessages(prev => [...prev, promptMessage, ...leadMessages, viewAllMessage]);
+  };
+
+  const showLeadStatusStats = () => {
+    if (leads.length === 0) {
+      addMessage("No leads available yet.", false);
+      return;
+    }
+
+    const statusCounts = leads.reduce((acc, lead) => {
+      acc[lead.status] = (acc[lead.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const statusMessage: Message = {
+      id: `status-${Date.now()}`,
+      content: 'Here are your lead status statistics:',
+      sender: 'ai',
+      timestamp: new Date(),
+      type: 'suggestion',
+      action: () => {
+        addMessage("Showing detailed status report", true);
+        setShowStatusModal(true);
+      }
+    };
+
+    const statusList = Object.entries(statusCounts).map(([status, count]) => ({
+      id: `status-${status}`,
+      content: `${status}: ${count} leads`,
+      sender: 'ai',
+      timestamp: new Date()
+    }));
+
+    setMessages(prev => [...prev, statusMessage, ...statusList]);
   };
 
   const showLeadStatusOptions = () => {
@@ -807,10 +916,9 @@ export const AIAssistant: React.FC = () => {
 
   const showImportPreview = (leadsToImport: Lead[]) => {
     setPreviewData(leadsToImport);
-    setShowPreview(true);
-
+    
     const columns = ['firstName', 'lastName', 'email', 'phone', 'status'];
-
+    
     const previewMessage: Message = {
       id: `preview-${Date.now()}`,
       content: 'I found these leads in the file. Would you like to import them?',
@@ -818,14 +926,14 @@ export const AIAssistant: React.FC = () => {
       timestamp: new Date(),
       type: 'preview',
       preview: {
-        data: leadsToImport.slice(0, 3),
+        data: leadsToImport.slice(0, 5),
         columns
       }
     };
 
     const confirmMessage: Message = {
       id: `confirm-import-${Date.now()}`,
-      content: 'Review the data before importing:',
+      content: 'Review all data before importing:',
       sender: 'ai',
       timestamp: new Date(),
       type: 'suggestion',
@@ -1203,6 +1311,7 @@ export const AIAssistant: React.FC = () => {
                 importLeadsToFirebase(previewData);
                 setShowPreview(false);
               }}
+              className="bg-green-600 hover:bg-green-700"
             >
               Import {previewData.length} Leads
             </Button>
@@ -1214,7 +1323,31 @@ export const AIAssistant: React.FC = () => {
       <Dialog open={showLeadsTable} onOpenChange={setShowLeadsTable}>
         <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>All Leads ({leads.length})</DialogTitle>
+            <DialogTitle>
+              All Leads ({leads.length})
+              <div className="flex gap-2 mt-2">
+                <Select 
+                  value={statusFilter}
+                  onValueChange={(value) => setStatusFilter(value)}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    {Array.from(new Set(leads.map(lead => lead.status))).map(status => (
+                      <SelectItem key={status} value={status}>{status}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button 
+                  variant="outline"
+                  onClick={() => setIsLeadFormOpen(true)}
+                >
+                  <Plus className="h-4 w-4 mr-2" /> Add Lead
+                </Button>
+              </div>
+            </DialogTitle>
           </DialogHeader>
           <div className="border rounded-lg overflow-hidden">
             <Table>
@@ -1228,7 +1361,9 @@ export const AIAssistant: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {leads.map((lead) => (
+                {leads
+                  .filter(lead => statusFilter === 'all' || lead.status === statusFilter)
+                  .map((lead) => (
                   <TableRow key={lead.id}>
                     <TableCell>{lead.firstName} {lead.lastName}</TableCell>
                     <TableCell>{lead.email}</TableCell>
@@ -1259,12 +1394,138 @@ export const AIAssistant: React.FC = () => {
                         >
                           <Trash2 className="h-4 w-4 mr-2" /> Delete
                         </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => {
+                            setShowLeadsTable(false);
+                            showContactMethods(lead);
+                          }}
+                        >
+                          <Phone className="h-4 w-4 mr-2" /> Contact
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              Showing {statusFilter === 'all' ? leads.length : leads.filter(lead => lead.status === statusFilter).length} of {leads.length} leads
+            </div>
+            <Button 
+              variant="outline"
+              onClick={() => {
+                const worksheet = XLSX.utils.json_to_sheet(leads);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Leads");
+                XLSX.writeFile(workbook, "leads_export.xlsx");
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" /> Export to Excel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Lead Status Statistics Dialog */}
+      <Dialog open={showStatusModal} onOpenChange={setShowStatusModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Lead Status Statistics</DialogTitle>
+          </DialogHeader>
+          <div className="border rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader className="bg-muted/50">
+                <TableRow>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Count</TableHead>
+                  <TableHead>Percentage</TableHead>
+                  <TableHead>Leads</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {Object.entries(
+                  leads.reduce((acc, lead) => {
+                    acc[lead.status] = (acc[lead.status] || 0) + 1;
+                    return acc;
+                  }, {} as Record<string, number>)
+                ).map(([status, count]) => (
+                  <TableRow key={status}>
+                    <TableCell>
+                      <Badge variant="outline">{status}</Badge>
+                    </TableCell>
+                    <TableCell>{count}</TableCell>
+                    <TableCell>{Math.round((count / leads.length) * 100)}%</TableCell>
+                    <TableCell>
+                      <Button 
+                        variant="link" 
+                        size="sm" 
+                        onClick={() => {
+                          setShowStatusModal(false);
+                          const filteredLeads = leads.filter(lead => lead.status === status);
+                          showFilteredLeads(filteredLeads, status);
+                        }}
+                      >
+                        View {count} leads
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="border rounded-lg p-4">
+              <h3 className="font-medium mb-2">Status Distribution</h3>
+              <div className="h-48">
+                <div className="flex flex-col gap-1">
+                  {Object.entries(
+                    leads.reduce((acc, lead) => {
+                      acc[lead.status] = (acc[lead.status] || 0) + 1;
+                      return acc;
+                    }, {} as Record<string, number>)
+                  ).map(([status, count]) => (
+                    <div key={status} className="flex items-center">
+                      <div 
+                        className="h-4 bg-blue-500 rounded mr-2" 
+                        style={{ width: `${(count / leads.length) * 100}%` }}
+                      />
+                      <span className="text-sm">
+                        {status}: {count} ({(count / leads.length * 100).toFixed(1)}%)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="border rounded-lg p-4">
+              <h3 className="font-medium mb-2">Quick Actions</h3>
+              <div className="space-y-2">
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => {
+                    setShowStatusModal(false);
+                    setShowLeadsTable(true);
+                  }}
+                >
+                  View All Leads
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => {
+                    setShowStatusModal(false);
+                    setIsLeadFormOpen(true);
+                  }}
+                >
+                  Create New Lead
+                </Button>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
