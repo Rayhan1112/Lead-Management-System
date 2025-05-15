@@ -1,4 +1,4 @@
-import React from "react";
+import React,{useEffect,useState,useRef} from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -6,6 +6,9 @@ import {
 import {Card,CardContent, CardHeader, CardTitle,} from "@/components/ui/card";
 import { motion, useAnimation } from "framer-motion";
 import { useInView } from "react-intersection-observer";
+import dashboard  from '../assets/dashboard.png'
+import leads  from '../assets/leads.png'
+import sales  from '../assets/sales.png'
 
 // Animation variants
 const container = {
@@ -72,6 +75,111 @@ export const WelcomePage: React.FC = () => {
   const navigate = useNavigate();
   const controls = useAnimation();
   const [activeTab, setActiveTab] = React.useState("monthly");
+  const canvasRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size
+    const resizeCanvas = () => {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+    };
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Particle class
+    class Particle {
+      x: number;
+      y: number;
+      size: number;
+      speedX: number;
+      speedY: number;
+      color: string;
+
+      constructor(width: number, height: number) {
+        this.x = Math.random() * width;
+        this.y = Math.random() * height;
+        this.size = Math.random() * 3 + 1;
+        this.speedX = Math.random() * 2 - 1;
+        this.speedY = Math.random() * 2 - 1;
+        this.color = `hsl(${Math.random() * 60 + 200}, 80%, 60%)`; // Blueish colors
+      }
+
+      update(width: number, height: number) {
+        this.x += this.speedX;
+        this.y += this.speedY;
+
+        // Bounce off edges
+        if (this.x < 0 || this.x > width) this.speedX *= -1;
+        if (this.y < 0 || this.y > height) this.speedY *= -1;
+      }
+
+      draw(ctx: CanvasRenderingContext2D) {
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glow effect
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+      }
+    }
+
+    // Create particles
+    const particles: Particle[] = [];
+    const particleCount = window.innerWidth < 768 ? 30 : 80;
+
+    for (let i = 0; i < particleCount; i++) {
+      particles.push(new Particle(canvas.width, canvas.height));
+    }
+
+    // Animation loop
+    let animationFrameId: number;
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.shadowBlur = 0;
+
+      // Draw connections
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < 150) {
+            const opacity = 1 - distance / 150;
+            ctx.strokeStyle = `rgba(100, 150, 255, ${opacity})`;
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Update and draw particles
+      particles.forEach(particle => {
+        particle.update(canvas.width, canvas.height);
+        particle.draw(ctx);
+      });
+
+      animationFrameId = requestAnimationFrame(animate);
+    };
+
+    animate();
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, []);
 
   React.useEffect(() => {
     const sequence = async () => {
@@ -83,42 +191,54 @@ export const WelcomePage: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col overflow-x-hidden bg-background">
       {/* Hero Section */}
-      <section className="relative py-32 flex items-center justify-center bg-gradient-to-br from-primary/10 to-background">
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="grid grid-cols-1 gap-12 items-center">
-            <div className="space-y-8 text-center">
-              <div className="inline-flex items-center px-4 py-2 bg-primary/10 text-primary rounded-full text-sm font-medium">
-                <Rocket className="h-4 w-4 mr-2" />
-                Revolutionizing Lead Management
-              </div>
+      <section className="relative h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 to-background overflow-hidden">
+      {/* Full-screen canvas animation */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full pointer-events-none opacity-40"
+      />
 
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight">
-                <span className="text-primary">AI-Powered Lead Management</span>{" "}
-                for Modern Businesses
-              </h1>
+      {/* Enhanced gradient overlay */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute top-20 left-20 w-80 h-80 rounded-full bg-primary/10 blur-[100px]"></div>
+        <div className="absolute bottom-20 right-20 w-96 h-96 rounded-full bg-purple-500/10 blur-[120px]"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] radial-gradient"></div>
+      </div>
 
-              <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-                Automate, nurture, and convert leads with our intelligent
-                platform powered by AI and machine learning.
-              </p>
+      <div className="container mx-auto px-4 relative z-10">
+        <div className="grid grid-cols-1 gap-12 items-center">
+          <div className="space-y-8 text-center">
+            <div className="inline-flex items-center px-4 py-2 bg-primary/10 text-primary rounded-full text-sm font-medium backdrop-blur-sm">
+              <Rocket className="h-4 w-4 mr-2" />
+              Revolutionizing Lead Management
+            </div>
 
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button
-                  size="lg"
-                  className="bg-primary hover:bg-primary/90 px-8 py-6 text-lg font-semibold"
-                  onClick={() => navigate("/login")}
-                >
-                  Get Started Free
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </div>
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight">
+              <span className="text-primary">Advanced Lead Management</span>{" "}
+              for Modern Businesses
+            </h1>
+
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              Automate, nurture, and convert leads with our intelligent
+              platform powered by AI and machine learning.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Button
+                size="lg"
+                className="bg-primary hover:bg-primary/90 px-8 py-6 text-lg font-semibold shadow-lg shadow-primary/30 hover:shadow-primary/40 transition-all transform hover:scale-105"
+                onClick={() => navigate("/login")}
+              >
+                Get Started Free
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
             </div>
           </div>
         </div>
-      </section>
-
+      </div>
+    </section>
       {/* Trusted By Section */}
-      <motion.section
+      {/* <motion.section
         initial="hidden"
         whileInView="show"
         variants={container}
@@ -134,7 +254,7 @@ export const WelcomePage: React.FC = () => {
           </motion.h2>
 
           {/* Mercury-style infinite scrolling logos */}
-          <div className="relative w-full overflow-hidden">
+          {/* <div className="relative w-full overflow-hidden">
             <motion.div
               variants={item}
               className="flex gap-8 w-max"
@@ -160,11 +280,12 @@ export const WelcomePage: React.FC = () => {
               ))}
             </motion.div>
           </div>
-        </div>
-      </motion.section>
+        </div> 
+           </motion.section>*/}
+
 
       {/* Features Section */}
-      <section className="py-20 bg-background">
+      {/* <section className="py-20 bg-background">
         <div className="container mx-auto px-4">
           <div className="text-center mb-20">
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6">
@@ -204,10 +325,10 @@ export const WelcomePage: React.FC = () => {
             />
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* Detailed Features Section */}
-      <section className="py-20 bg-background relative overflow-hidden">
+      <section className="py-20 bg-background relative overflow-hidden mt-32">
         <div className="container mx-auto px-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -278,7 +399,7 @@ export const WelcomePage: React.FC = () => {
             >
               <div className="relative rounded-2xl overflow-hidden border border-border shadow-xl">
                 <img
-                  src="/screenshots/lead-capture.png"
+                  src={dashboard}
                   alt="Lead Capture Dashboard"
                   className="w-full h-auto"
                 />
@@ -296,7 +417,7 @@ export const WelcomePage: React.FC = () => {
             >
               <div className="relative rounded-2xl overflow-hidden border border-border shadow-xl">
                 <img
-                  src="/screenshots/lead-nurturing.png"
+                  src={leads}
                   alt="Lead Nurturing Dashboard"
                   className="w-full h-auto"
                 />
@@ -399,7 +520,7 @@ export const WelcomePage: React.FC = () => {
             >
               <div className="relative rounded-2xl overflow-hidden border border-border shadow-xl">
                 <img
-                  src="/screenshots/sales-tools.png"
+                  src={sales}
                   alt="Sales Tools Dashboard"
                   className="w-full h-auto"
                 />
