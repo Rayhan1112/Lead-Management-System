@@ -136,6 +136,7 @@ export const LoginForm: React.FC = () => {
         localStorage.setItem('adminKey', adminId);
         if (userRole === 'admin') {
           localStorage.removeItem('agentKey');
+          
           toast.success('Welcome back, Admin!');
         } else {
           localStorage.setItem('agentKey', user.uid);

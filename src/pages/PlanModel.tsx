@@ -61,7 +61,7 @@ const PlanModal = ({ isOpen, onClose }) => {
   return (
     <AnimatePresence>
       <motion.div 
-        className="fixed inset-0 flex items-center justify-center z-100 mt-[-100px]"
+        className="fixed inset-0 flex items-center justify-center z-50 mt-[-100px]"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -69,7 +69,7 @@ const PlanModal = ({ isOpen, onClose }) => {
       >
         {/* Overlay with subtle parallax effect */}
         <motion.div  
-          className=" z-100 absolute inset-0 bg-gradient-to-br from-blue-900/60 to-purple-900/60 backdrop-blur-sm mt-[-100px]"
+          className="absolute inset-0 bg-gradient-to-br from-blue-900/60 to-purple-900/60 backdrop-blur-sm mt-[-100px]"
           onClick={onClose}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
