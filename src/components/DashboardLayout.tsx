@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
@@ -27,45 +26,47 @@ interface DashboardLayoutProps {
 }
 
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isMobile = useIsMobile();
 
-  const adminMenuItems = [
+  // User details
+  const userName = user?.firstName || 'User';
+  const userEmail = user?.email || '';
+  const userInitial = userName.charAt(0).toUpperCase();
+  const userRole = user?.role === 'admin' ? 'Admin' : 'agent';
+
+  // Menu items configuration
+  const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     { icon: FileText, label: 'Leads', path: '/leads' },
-    { icon: Users, label: 'Agents', path: '/agents' },
+    ...(user?.role === 'admin' ? [
+      { icon: Users, label: 'Agents', path: '/agents' },
+      { icon: BarChartBig, label: 'Assign Leads', path: '/assignLeads' }
+    ] : []),
     { icon: FileText, label: 'Tasks', path: '/tasks' },
     { icon: Calendar, label: 'Meetings', path: '/meetings' },
     { icon: BarChartBig, label: 'Deals', path: '/deals' },
-    { icon: Settings, label: 'Settings', path: '/settings' },
+    { icon: Settings, label: 'Settings', path: '/settings' }
   ];
-
-  const agentMenuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-    { icon: FileText, label: 'Leads', path: '/leads' },
-    { icon: FileText, label: 'Tasks', path: '/tasks' },
-    { icon: Calendar, label: 'Meetings', path: '/meetings' },
-    { icon: BarChartBig, label: 'Deals', path: '/deals' },
-    { icon: Settings, label: 'Settings', path: '/settings' },
-  ];
-
-  const menuItems = isAdmin ? adminMenuItems : agentMenuItems;
 
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar */}
+    <div className="flex h-screen bg-gray-50 overflow-hidden"> {/* Changed min-h-screen to h-screen and added overflow-hidden */}
+      {/* Sidebar - Desktop */}
       <aside 
-        className={`fixed inset-y-0 left-0 z-50 w-64 transform bg-background border-r border-border transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static ${
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } md:block hidden`}
       >
         <div className="flex flex-col h-full">
+          {/* Sidebar Header */}
           <div className="flex items-center justify-between p-4">
             <div className="flex items-center space-x-2">
-              <div className="h-8 w-8 bg-pulse rounded-full"></div>
-              <h2 className="text-lg font-semibold">Pulse CRM</h2>
+              <div className="h-8 w-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+                P
+              </div>
+              <h2 className="text-lg font-semibold">PTS - CRM</h2>
             </div>
             <button 
               onClick={() => setSidebarOpen(false)} 
@@ -77,6 +78,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
           
           <Separator />
           
+          {/* Navigation Menu */}
           <div className="flex-1 py-4 overflow-y-auto">
             <nav className="px-2 space-y-1">
               {menuItems.map((item) => (
@@ -84,15 +86,15 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
                   key={item.path}
                   to={item.path}
                   className={({ isActive }) =>
-                    `flex items-center px-3 py-2 rounded-lg transition-all duration-200 ${
+                    `flex items-center px-3 py-2.5 rounded-lg transition-all ${
                       isActive
-                        ? 'bg-pulse text-white shadow-md'
-                        : 'text-foreground hover:bg-muted'
+                        ? 'bg-blue-500 text-white shadow-md'
+                        : 'text-gray-700 hover:bg-gray-100'
                     }`
                   }
                 >
                   <item.icon className="mr-3 h-5 w-5" />
-                  <span>{item.label}</span>
+                  <span className="text-sm font-medium">{item.label}</span>
                 </NavLink>
               ))}
             </nav>
@@ -100,23 +102,35 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
           
           <Separator />
           
+          {/* User Profile Section */}
           <div className="p-4">
             <div className="flex items-center space-x-3">
-              <Avatar className="h-8 w-8">
-                <AvatarImage src={user?.avatar} alt={user?.name || 'User'} />
-                <AvatarFallback>{user?.name?.charAt(0) || 'U'}</AvatarFallback>
+              <Avatar className="h-9 w-9">
+                <AvatarImage src={user?.photoURL} alt={userName} />
+                <AvatarFallback className="bg-blue-100 text-blue-600">
+                  {userInitial}
+                </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{user?.name}</p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {user?.role?.charAt(0).toUpperCase() + user?.role?.slice(1) || 'User'}
-                </p>
+                <p className="text-sm font-medium truncate">{userName}</p>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-500">{userRole}</span>
+                  <span className="text-xs text-gray-400">•</span>
+                  <div className="group relative">
+                    <span className="text-xs text-gray-500 truncate max-w-[100px] inline-block">
+                      {userEmail.split('@')[0]}@...
+                    </span>
+                    <div className="absolute hidden group-hover:block bg-white p-2 rounded shadow-lg border border-gray-200 z-10 min-w-[200px]">
+                      <p className="text-xs text-gray-700">{userEmail}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={logout}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-gray-500 hover:text-gray-700"
                 aria-label="Log out"
               >
                 <LogOut size={18} />
@@ -126,50 +140,70 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
         </div>
       </aside>
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-h-screen">
-        {/* Header */}
-        <header className="bg-background border-b border-border h-16 flex items-center justify-between px-4 lg:px-6">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden"> {/* Changed min-h-screen to h-screen and added overflow-hidden */}
+        {/* Top Header */}
+        <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-4 lg:px-6 shrink-0"> {/* Added shrink-0 */}
           <div className="flex items-center">
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setSidebarOpen(true)}
-              className="md:hidden text-muted-foreground hover:text-foreground"
+              className="md:hidden text-gray-500 hover:text-gray-700"
               aria-label="Open sidebar"
             >
               <Menu size={20} />
             </Button>
             <h1 className="ml-4 text-lg font-semibold lg:text-xl">
-              {isAdmin ? 'Admin' : 'Agent'} Dashboard
+              {userName}'s Workspace
             </h1>
           </div>
           
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
             <NotificationDropdown />
             
+            {/* User Profile Dropdown */}
             <div className="relative group">
               <Button
                 variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => navigate('/settings')}
+                className="flex items-center space-x-2 hover:bg-gray-100"
               >
-                <User size={20} />
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user?.photoURL} alt={userName} />
+                  <AvatarFallback className="bg-blue-100 text-blue-600">
+                    {userInitial}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="hidden md:inline text-sm font-medium">
+                {user.firstName } ({ user.role.toLocaleUpperCase()})
+                </span>
               </Button>
-              <div className="absolute right-0 mt-1 w-32 rounded-md shadow-lg bg-popover border border-border hidden group-hover:block z-10">
-                <div className="py-1 rounded-md">
+              
+              <div className="absolute right-0 mt-2 w-56 origin-top-right bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-50 hidden group-hover:block">
+                <div className="py-1">
+                  <div className="px-4 py-2">
+                    <p className="text-sm font-medium">{userName}</p>
+                    <p className="text-xs text-gray-500 truncate">{userEmail}</p>
+                  </div>
+                  <Separator />
                   <button
-                    onClick={() => navigate('/settings')}
-                    className="w-full text-left block px-4 py-2 text-sm text-foreground hover:bg-muted"
+                    onClick={() => navigate('/profile')}
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                   >
-                    Settings
+                    Your Profile
                   </button>
                   <button
-                    onClick={logout}
-                    className="w-full text-left block px-4 py-2 text-sm text-red-500 hover:bg-muted"
+                    onClick={() => navigate('/settings')}
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                   >
-                    Logout
+                    Account Settings
+                  </button>
+                  <Separator />
+                  <button
+                    onClick={logout}
+                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                  >
+                    Sign Out
                   </button>
                 </div>
               </div>
@@ -177,13 +211,13 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
           </div>
         </header>
 
-        {/* Main content */}
-        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6 pb-20 md:pb-6">
+        {/* Main Content - Now scrollable */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 pb-20 md:pb-6"> {/* Only this part scrolls */}
           {children}
         </main>
         
         {/* Mobile Bottom Navigation */}
-        <MobileNavBar />
+        {isMobile && <MobileNavBar />}
       </div>
     </div>
   );

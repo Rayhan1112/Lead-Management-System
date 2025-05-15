@@ -17,7 +17,7 @@ export interface Agent {
   name: string;
   email: string;
   phone: string;
-  role: 'senior' | 'junior';
+  designation: string;
   assignedLeads: number;
   status: 'active' | 'inactive';
   createdAt: string;
@@ -26,6 +26,7 @@ export interface Agent {
 }
 
 export interface Task {
+  name: string | number | readonly string[];
   id: string;
   title: string;
   description: string;
@@ -90,7 +91,7 @@ export const generateLeads = (count: number): Lead[] => {
 };
 
 export const generateAgents = (count: number): Agent[] => {
-  const roles: Agent['role'][] = ['senior', 'junior'];
+  // const roles: Agent['role'][] = ['senior', 'junior'];
   const statuses: Agent['status'][] = ['active', 'inactive'];
   
   return Array.from({ length: count }, (_, i) => ({
@@ -98,7 +99,7 @@ export const generateAgents = (count: number): Agent[] => {
     name: `Agent ${i + 1}`,
     email: `agent${i + 1}@pulsecrm.com`,
     phone: `+1987654321${i}`,
-    role: roles[Math.floor(Math.random() * roles.length)],
+    designation: `software developer`,
     assignedLeads: Math.floor(Math.random() * 15),
     status: statuses[Math.floor(Math.random() * statuses.length)],
     createdAt: format(subDays(new Date(), Math.floor(Math.random() * 60)), 'yyyy-MM-dd'),

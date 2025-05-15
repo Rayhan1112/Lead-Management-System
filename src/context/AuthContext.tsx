@@ -1,8 +1,8 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User as FirebaseUser } from 'firebase/auth';
-import { getDatabase, ref, set } from 'firebase/database';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User as FirebaseUser, UserCredential } from 'firebase/auth';
+import { getDatabase, ref, set, get } from 'firebase/database';
 
 type UserRole = 'admin' | 'agent' | null;
 
@@ -12,11 +12,12 @@ interface User {
   lastName: string;
   email: string;
   role: UserRole;
+  parentAdminId?: string;
 }
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, role: UserRole) => Promise<UserCredential>;
   signup: (firstName: string, lastName: string, email: string, password: string, role: UserRole) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
@@ -26,19 +27,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyC4tt2fFP7I0TYm3sGhTWQF_59LZ9uiERQ",
-  authDomain: "new-lms-3a0dc.firebaseapp.com",
-  databaseURL: "https://new-lms-3a0dc-default-rtdb.firebaseio.com", // Add Realtime DB URL
-  projectId: "new-lms-3a0dc",
-  storageBucket: "new-lms-3a0dc.appspot.com",
-  messagingSenderId: "956423626146",
-  appId: "1:956423626146:web:63b0c32e4640181dc7e6fb",
-  measurementId: "G-NZ9H6VP6TB"
+  apiKey: "AIzaSyA8_GQNQB1kw803JB_bvo240Oh-a6PZEsM",
+  authDomain: "final-lms-d15f0.firebaseapp.com",
+  databaseURL: "https://final-lms-d15f0-default-rtdb.firebaseio.com",
+  projectId: "final-lms-d15f0",
+  storageBucket: "final-lms-d15f0.firebasestorage.app",
+  messagingSenderId: "700655769720",
+  appId: "1:700655769720:web:569b445a99bdf6375bb58d",
+  measurementId: "G-13D5MWJD3E"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const database = getDatabase(app);
@@ -46,38 +45,99 @@ const database = getDatabase(app);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const navigate = useNavigate();
+  
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (firebaseUser: FirebaseUser | null) => {
+    const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
-        // In a real app, you would fetch user data from your database here
-        const token = await firebaseUser.getIdTokenResult();
-        const role = token.claims.role as UserRole || null;
-        
-        setUser({
-          id: firebaseUser.uid,
-          firstName: firebaseUser.displayName?.split(' ')[0] || '',
-          lastName: firebaseUser.displayName?.split(' ')[1] || '',
-          email: firebaseUser.email || '',
-          role
-        });
+        await handleUserAuth(firebaseUser);
       } else {
-        setUser(null);
+        clearAuthState();
       }
     });
-
-    return () => unsubscribe();
+    return unsubscribe;
   }, []);
+
+  const handleUserAuth = async (firebaseUser: FirebaseUser) => {
+    const agentCheck = await checkIfAgentExists(firebaseUser.email || '');
+    if (agentCheck) {
+      setAgentAuthState(firebaseUser, agentCheck);
+      return;
+    }
+
+    const userRef = ref(database, `users/${firebaseUser.uid}`);
+    const snapshot = await get(userRef);
+    
+    if (snapshot.exists()) {
+      const userData = snapshot.val();
+      setUser({
+        id: firebaseUser.uid,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        email: firebaseUser.email || '',
+        role: userData.role
+      });
+      
+      localStorage.setItem('userRole', userData.role || '');
+      if (userData.role === 'admin') {
+        localStorage.setItem('adminkey', firebaseUser.uid);
+      }
+    }
+  };
+
+  const setAgentAuthState = (firebaseUser: FirebaseUser, agentData: {firstName: string, lastName: string, parentAdminId: string}) => {
+    setUser({
+      id: firebaseUser.uid,
+      firstName: agentData.firstName,
+      lastName: agentData.lastName,
+      email: firebaseUser.email || '',
+      role: 'agent',
+      parentAdminId: agentData.parentAdminId
+    });
+    localStorage.setItem('userRole', 'agent');
+    localStorage.setItem('agentkey', firebaseUser.uid);
+    localStorage.setItem('adminkey', agentData.parentAdminId);
+  };
+
+  const clearAuthState = () => {
+    setUser(null);
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('adminkey');
+    localStorage.removeItem('agentkey');
+  };
+
+  const checkIfAgentExists = async (email: string) => {
+    try {
+      const adminsRef = ref(database, 'users');
+      const snapshot = await get(adminsRef);
+      
+      if (snapshot.exists()) {
+        for (const [adminId, adminData] of Object.entries(snapshot.val()) as [string, any][]) {
+          if (adminData.agents) {
+            for (const [agentId, agentData] of Object.entries(adminData.agents) as [string, any][]) {
+              if (agentData.email === email) {
+                return {
+                  firstName: agentData.firstName,
+                  lastName: agentData.lastName,
+                  parentAdminId: adminId
+                };
+              }
+            }
+          }
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Error checking for agent:', error);
+      return null;
+    }
+  };
 
   const signup = async (firstName: string, lastName: string, email: string, password: string, role: UserRole) => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
       
-      // Set custom user claims (for role-based access)
-      // Note: In a real app, you would do this via a Firebase Cloud Function
-      
-      // Save additional user data to Realtime Database
       await set(ref(database, `users/${firebaseUser.uid}`), {
         firstName,
         lastName,
@@ -94,68 +154,85 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role
       });
 
+      localStorage.setItem('userRole', role || '');
+      if (role === 'admin') {
+        localStorage.setItem('adminkey', firebaseUser.uid);
+      }
+
       navigate('/dashboard');
     } catch (error: any) {
       throw new Error(error.message);
     }
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, role: UserRole): Promise<UserCredential> => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const firebaseUser = userCredential.user;
       
-      // Fetch user data from database
-      // In a real app, you would fetch this data
-      const token = await firebaseUser.getIdTokenResult();
-      const role = token.claims.role as UserRole || 'agent';
-      
-      setUser({
-        id: firebaseUser.uid,
-        firstName: firebaseUser.displayName?.split(' ')[0] || '',
-        lastName: firebaseUser.displayName?.split(' ')[1] || '',
-        email: firebaseUser.email || '',
-        role
-      });
-
-      navigate('/dashboard');
+      if (role === 'agent') {
+        const agentCheck = await checkIfAgentExists(email);
+        if (!agentCheck) {
+          await auth.signOut(); // Sign out if not a valid agent
+          throw new Error('Agent not found under any admin account');
+        }
+      } else {
+        const userRef = ref(database, `users/${userCredential.user.uid}`);
+        const snapshot = await get(userRef);
+        
+        if (!snapshot.exists()) {
+          await auth.signOut(); // Sign out if user doesn't exist
+          throw new Error('User not found');
+        }
+  
+        const userData = snapshot.val();
+        if (userData.role !== role) {
+          await auth.signOut(); // Sign out if role doesn't match
+          throw new Error(`Invalid role. Expected ${role} but found ${userData.role}`);
+        }
+  
+        // Additional check for email match
+        if (userData.email !== email) {
+          await auth.signOut();
+          throw new Error('Email mismatch in database');
+        }
+      }
+  
+      return userCredential;
     } catch (error: any) {
-      throw new Error(error.message);
+      // If Firebase auth succeeds but our checks fail, make sure to sign out
+      if (auth.currentUser) {
+        await auth.signOut();
+      }
+      throw new Error(error.message || 'Login failed');
     }
   };
 
   const logout = async () => {
     try {
       await signOut(auth);
-      setUser(null);
+      clearAuthState();
       navigate('/login');
     } catch (error: any) {
       throw new Error(error.message);
     }
   };
 
-  const isAuthenticated = !!user;
-  const isAdmin = user?.role === 'admin';
-  const isAgent = user?.role === 'agent';
+  const value = {
+    user,
+    login,
+    signup,
+    logout,
+    isAuthenticated: !!user,
+    isAdmin: user?.role === 'admin',
+    isAgent: user?.role === 'agent',
+  };
 
-  return (
-    <AuthContext.Provider value={{
-      user,
-      login,
-      signup,
-      logout,
-      isAuthenticated: isAuthenticated,
-      isAdmin,
-      isAgent,
-    }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export const useAuth = (): AuthContextType => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;

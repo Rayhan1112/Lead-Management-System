@@ -54,7 +54,6 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
   const [availableAgents, setAvailableAgents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   useEffect(() => {
     if (meeting) {
@@ -89,13 +88,14 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         return;
       }
 
+      // Request notification permission
       const permission = await Notification.requestPermission();
       setNotificationPermission(permission);
 
       if (permission === 'granted' && messaging) {
         try {
           const currentToken = await getToken(messaging, { 
-            vapidKey: 'YOUR_VAPID_KEY'
+            vapidKey: 'YOUR_VAPID_KEY' // Replace with your VAPID key
           });
           if (currentToken && user?.id) {
             await update(ref(database, `users/${user.id}/fcmToken`), currentToken);
@@ -105,6 +105,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         }
       }
 
+      // Set up message listener
       if (messaging) {
         onMessage(messaging, (payload) => {
           const { title, body } = payload.notification || {};
@@ -174,7 +175,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
 
     try {
       const meetingDateTime = parseISO(`${meeting.startDate}T${meeting.startTime}`);
-      let reminderMinutes = 15;
+      let reminderMinutes = 15; // default
       
       if (meeting.reminder === '5min') reminderMinutes = 5;
       else if (meeting.reminder === '10min') reminderMinutes = 10;
@@ -185,6 +186,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
       if (notificationTime > now) {
         const timeUntilNotification = notificationTime.getTime() - now.getTime();
         
+        // Schedule local notification
         setTimeout(() => {
           if (notificationPermission === 'granted') {
             new Notification(`Meeting Reminder: ${meeting.title}`, {
@@ -194,6 +196,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
           }
         }, timeUntilNotification);
         
+        // Schedule push notification via FCM
         const notificationId = `notification-${Date.now()}`;
         const notificationRef = ref(database, `notifications/${notificationId}`);
         
@@ -207,6 +210,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
           createdAt: new Date().toISOString(),
         });
         
+        // Store notification ID in meeting
         await update(ref(database, `users/${adminId}/meetingdetails/${meeting.id}`), {
           notificationId
         });
@@ -325,7 +329,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[500px] neuro border-none max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px] neuro border-none">
         <DialogHeader>
           <DialogTitle>{meeting ? 'Edit Meeting' : 'Schedule New Meeting'}</DialogTitle>
         </DialogHeader>
@@ -430,56 +434,28 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
           {(isAdmin || agentId) && (
             <div className="space-y-2">
               <Label htmlFor="participants">Participants</Label>
-              <div className="relative">
-                <Select
-                  open={isDropdownOpen}
-                  onOpenChange={setIsDropdownOpen}
-                >
-                  <SelectTrigger 
-                    className="neuro-inset focus:shadow-none w-full"
-                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  >
-                    <SelectValue placeholder={`${selectedAgents.length} participant(s) selected`} />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60 overflow-y-auto">
-                    {isLoading ? (
-                      <div className="text-center text-sm text-muted-foreground p-2">Loading agents...</div>
-                    ) : availableAgents.length > 0 ? (
-                      availableAgents.map(agent => (
-                        <div 
-                          key={agent.id} 
-                          className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAgentToggle(agent.id);
-                          }}
-                        >
-                          <Checkbox 
-                            id={`agent-${agent.id}`} 
-                            checked={selectedAgents.includes(agent.id)}
-                            onCheckedChange={() => {}}
-                            disabled={!isAdmin && agent.id === user?.id && selectedAgents.length <= 1}
-                          />
-                          <label htmlFor={`agent-${agent.id}`} className="text-sm cursor-pointer">
-                            {agent.firstName} {agent.lastName} ({agent.email})
-                            {agent.id === user?.id && " (You)"}
-                          </label>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-center text-sm text-muted-foreground p-2">No agents available</div>
-                    )}
-                  </SelectContent>
-                </Select>
+              <div className="neuro-inset p-3 rounded-md space-y-2 max-h-40 overflow-y-auto">
+                {isLoading ? (
+                  <div className="text-center text-sm text-muted-foreground">Loading agents...</div>
+                ) : availableAgents.length > 0 ? (
+                  availableAgents.map(agent => (
+                    <div key={agent.id} className="flex items-center space-x-2">
+                      <Checkbox 
+                        id={`agent-${agent.id}`} 
+                        checked={selectedAgents.includes(agent.id)}
+                        onCheckedChange={() => handleAgentToggle(agent.id)}
+                        disabled={!isAdmin && agent.id === user?.id && selectedAgents.length <= 1}
+                      />
+                      <label htmlFor={`agent-${agent.id}`} className="text-sm">
+                        {agent.firstName} {agent.lastName} ({agent.email})
+                        {agent.id === user?.id && " (You)"}
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center text-sm text-muted-foreground">No agents available</div>
+                )}
               </div>
-              {selectedAgents.length > 0 && (
-                <div className="text-xs text-muted-foreground mt-1">
-                  Selected: {selectedAgents.map(id => {
-                    const agent = availableAgents.find(a => a.id === id);
-                    return agent ? `${agent.firstName} ${agent.lastName}` : '';
-                  }).filter(Boolean).join(', ')}
-                </div>
-              )}
             </div>
           )}
           

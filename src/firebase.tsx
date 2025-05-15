@@ -5,17 +5,18 @@ import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
 import { getDatabase } from "firebase/database"; // Realtime Database
+import { getMessaging } from 'firebase/messaging';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyC4tt2fFP7I0TYm3sGhTWQF_59LZ9uiERQ",
-  authDomain: "new-lms-3a0dc.firebaseapp.com",
-  databaseURL: "https://new-lms-3a0dc-default-rtdb.firebaseio.com", // Add Realtime DB URL
-  projectId: "new-lms-3a0dc",
-  storageBucket: "new-lms-3a0dc.appspot.com",
-  messagingSenderId: "956423626146",
-  appId: "1:956423626146:web:63b0c32e4640181dc7e6fb",
-  measurementId: "G-NZ9H6VP6TB"
+  apiKey: "AIzaSyA8_GQNQB1kw803JB_bvo240Oh-a6PZEsM",
+  authDomain: "final-lms-d15f0.firebaseapp.com",
+  databaseURL: "https://final-lms-d15f0-default-rtdb.firebaseio.com",
+  projectId: "final-lms-d15f0",
+  storageBucket: "final-lms-d15f0.firebasestorage.app",
+  messagingSenderId: "700655769720",
+  appId: "1:700655769720:web:569b445a99bdf6375bb58d",
+  measurementId: "G-13D5MWJD3E"
 };
 
 // Initialize Firebase
@@ -25,6 +26,7 @@ const analytics = getAnalytics(app);
 // Initialize Firebase Authentication and Realtime Database
 const auth = getAuth(app);
 const database = getDatabase(app);
+const messaging = getMessaging(app);
 
 // Export the services for use in your app
-export { app, analytics, auth, database };
+export { app, analytics, auth, database,messaging };

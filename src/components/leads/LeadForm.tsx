@@ -1,85 +1,278 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Lead } from '@/lib/mockData';
 import { format } from 'date-fns';
+import { database } from '../../firebase';
+import { get,ref, push, set,child, update } from 'firebase/database';
+import { useAuth } from '@/context/AuthContext';
+import { toast } from 'sonner';
+import PlanModal from '@/pages/PlanModel';
+
+interface RealEstateLead {
+  id?: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  company?: string;
+  propertyType: 'residential' | 'commercial' | 'land' | 'rental';
+  budget: string;
+  location: string;
+  bedrooms?: string;
+  bathrooms?: string;
+  squareFootage?: string;
+  timeline: 'immediately' | '1-3 months' | '3-6 months' | '6+ months';
+  source: 'website' | 'referral' | 'social' | 'ad' | 'open house' | 'other';
+  status: 'new' | 'contacted' | 'viewing scheduled' | 'offer made' | 'negotiation' | 'closed';
+  notes: string;
+  preferredContactMethod: 'phone' | 'email' | 'text';
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface LeadFormProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (lead: Lead) => void;
-  lead?: Lead;
+  onSubmit: (lead: RealEstateLead) => void;
+  lead?: RealEstateLead;
 }
 
 export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, lead }) => {
-  const [formData, setFormData] = useState<Partial<Lead>>(
-    lead || {
-      name: '',
-      company: '',
-      email: '',
-      phone: '',
-      status: 'new',
-      source: '',
+  const currentUser = localStorage.getItem('adminkey');
+  const [formData, setFormData] = useState<RealEstateLead>({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    company: '',
+    propertyType: 'residential',
+    budget: '',
+    location: '',
+    bedrooms: '',
+    bathrooms: '',
+    squareFootage: '',
+    timeline: '1-3 months',
+    source: 'website',
+    status: 'new',
+    notes: '',
+    preferredContactMethod: 'phone',
+    createdAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+    updatedAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+    const [showModal, setShowModal] = useState(false);
+  
+
+  // Initialize form with lead data when editing
+  useEffect(() => {
+    if (lead) {
+      setFormData({
+        ...lead,
+        updatedAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+      });
+    } else {
+      // Reset form when adding new lead
+      setFormData({
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        company: '',
+        propertyType: 'residential',
+        budget: '',
+        location: '',
+        bedrooms: '',
+        bathrooms: '',
+        squareFootage: '',
+        timeline: '1-3 months',
+        source: 'website',
+        status: 'new',
+        notes: '',
+        preferredContactMethod: 'phone',
+        createdAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+        updatedAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+      });
     }
-  );
+  }, [lead]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
-  const handleSelectChange = (field: string, value: string) => {
-    setFormData({
-      ...formData,
+  const handleSelectChange = (field: keyof RealEstateLead, value: string) => {
+    setFormData(prev => ({
+      ...prev,
       [field]: value,
-    });
+    }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const newLead: Lead = {
-      id: lead?.id || `lead-${Date.now()}`,
-      name: formData.name || '',
-      company: formData.company || '',
-      email: formData.email || '',
-      phone: formData.phone || '',
-      status: (formData.status as Lead['status']) || 'new',
-      source: formData.source || '',
-      createdAt: lead?.createdAt || format(new Date(), 'yyyy-MM-dd'),
-    };
-    
-    onSubmit(newLead);
+    if (!currentUser) {
+      setError('User not authenticated');
+      return;
+    }
+  
+    setIsSubmitting(true);
+    setError('');
+  
+    try {
+      // Get the admin ID (for agents, we use the stored adminKey; for admins, we use their own UID)
+      const adminId = localStorage.getItem('role') === 'agent' 
+        ? localStorage.getItem('adminKey')
+        : currentUser;
+  
+      if (!adminId) {
+        throw new Error('Admin ID not found');
+      }
+  
+      // References for lead limit and current leads
+      const leadLimitRef = ref(database, `users/${adminId}/leadLimit`);
+      const leadsRef = ref(database, `users/${adminId}/leads`);
+      
+      // Get both values from Firebase
+      const [limitSnapshot, leadsSnapshot] = await Promise.all([
+        get(leadLimitRef),
+        get(leadsRef)
+      ]);
+  
+      const leadLimit = limitSnapshot.exists() ? limitSnapshot.val() : 0;
+      const currentLeads = leadsSnapshot.exists() ? leadsSnapshot.val() : {};
+      const currentLeadCount = Object.keys(currentLeads).length;
+  
+      // Check lead limit
+      if (currentLeadCount >= leadLimit) {
+        setError(`You've reached your lead limit of ${leadLimit}. Please upgrade your plan to add more leads.`);
+        setShowModal(true);
+        onClose();
+        return;
+      }
+  
+      // Generate a new lead ID
+      const newLeadId = push(child(ref(database), 'leads')).key;
+      
+      // Prepare lead data with additional metadata
+      const leadData = {
+        ...formData,
+        id: newLeadId,
+        createdAt: new Date().toISOString(),
+        createdBy: currentUser,
+        status: 'new', // default status
+        lastUpdated: new Date().toISOString()
+      };
+  
+      // Save the lead under the admin's leads
+      await set(child(leadsRef, newLeadId), leadData);
+  
+      // If you want to also store a reference under the agent who created it (for agents)
+      if (localStorage.getItem('role') === 'agent') {
+        const agentLeadsRef = ref(database, `agents/${adminId}/leads/${newLeadId}`);
+        await set(agentLeadsRef, { 
+          leadId: newLeadId,
+          assignedAt: new Date().toISOString()
+        });
+      }
+  
+      // Call the original onSubmit callback if needed
+      if (onSubmit) {
+        await onSubmit(leadData);
+      }
+  
+      onClose();
+      toast.success('Lead added successfully!');
+      
+    } catch (err) {
+      console.error('Error saving lead:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save lead. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[500px] neuro border-none">
-        <DialogHeader>
+      <DialogContent className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-2xl h-[90vh] flex flex-col neuro border-none">
+        <DialogHeader className="px-6 pt-6 pb-0 flex-none">
           <DialogTitle>{lead ? 'Edit Lead' : 'Add New Lead'}</DialogTitle>
         </DialogHeader>
         
-        <form onSubmit={handleSubmit} className="space-y-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                name="name"
-                className="neuro-inset focus:shadow-none"
-                value={formData.name}
-                onChange={handleChange}
-                required
-              />
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 bg-red-100 text-red-700 rounded-md">
+                {error}
+              </div>
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="firstName">First Name*</Label>
+                <Input
+                  id="firstName"
+                  name="firstName"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.firstName}
+                  onChange={handleChange}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="lastName">Last Name*</Label>
+                <Input
+                  id="lastName"
+                  name="lastName"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.lastName}
+                  onChange={handleChange}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
             </div>
             
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email*</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.email}
+                  onChange={handleChange}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone*</Label>
+                <Input
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.phone}
+                  onChange={handleChange}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="company">Company</Label>
               <Input
@@ -88,107 +281,230 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
                 className="neuro-inset focus:shadow-none"
                 value={formData.company}
                 onChange={handleChange}
-                required
-              />
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                className="neuro-inset focus:shadow-none"
-                value={formData.email}
-                onChange={handleChange}
-                required
+                disabled={isSubmitting}
               />
             </div>
             
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone</Label>
-              <Input
-                id="phone"
-                name="phone"
-                className="neuro-inset focus:shadow-none"
-                value={formData.phone}
-                onChange={handleChange}
-                required
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="propertyType">Property Type*</Label>
+                <Select 
+                  value={formData.propertyType}
+                  onValueChange={(value) => handleSelectChange('propertyType', value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger className="neuro-inset focus:shadow-none">
+                    <SelectValue placeholder="Select property type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="residential">Residential</SelectItem>
+                    <SelectItem value="commercial">Commercial</SelectItem>
+                    <SelectItem value="land">Land</SelectItem>
+                    <SelectItem value="rental">Rental</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="budget">Budget*</Label>
+                <Input
+                  id="budget"
+                  name="budget"
+                  type="text"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.budget}
+                  onChange={handleChange}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
             </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="location">Preferred Location*</Label>
+                <Input
+                  id="location"
+                  name="location"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.location}
+                  onChange={handleChange}
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="timeline">Purchase Timeline*</Label>
+                <Select 
+                  value={formData.timeline}
+                  onValueChange={(value) => handleSelectChange('timeline', value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger className="neuro-inset focus:shadow-none">
+                    <SelectValue placeholder="Select timeline" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="immediately">Immediately</SelectItem>
+                    <SelectItem value="1-3 months">1-3 months</SelectItem>
+                    <SelectItem value="3-6 months">3-6 months</SelectItem>
+                    <SelectItem value="6+ months">6+ months</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="bedrooms">Bedrooms</Label>
+                <Input
+                  id="bedrooms"
+                  name="bedrooms"
+                  type="number"
+                  min="0"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.bedrooms}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="bathrooms">Bathrooms</Label>
+                <Input
+                  id="bathrooms"
+                  name="bathrooms"
+                  type="number"
+                  min="0"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.bathrooms}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="squareFootage">Square Footage</Label>
+                <Input
+                  id="squareFootage"
+                  name="squareFootage"
+                  type="number"
+                  min="0"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.squareFootage}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="source">Lead Source*</Label>
+                <Select 
+                  value={formData.source}
+                  onValueChange={(value) => handleSelectChange('source', value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger className="neuro-inset focus:shadow-none">
+                    <SelectValue placeholder="Select source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="website">Website</SelectItem>
+                    <SelectItem value="referral">Referral</SelectItem>
+                    <SelectItem value="social">Social Media</SelectItem>
+                    <SelectItem value="ad">Advertisement</SelectItem>
+                    <SelectItem value="open house">Open House</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="preferredContactMethod">Contact Preference*</Label>
+                <Select 
+                  value={formData.preferredContactMethod}
+                  onValueChange={(value) => handleSelectChange('preferredContactMethod', value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger className="neuro-inset focus:shadow-none">
+                    <SelectValue placeholder="Select preference" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="phone">Phone Call</SelectItem>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="text">Text Message</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
             <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
+              <Label htmlFor="status">Lead Status</Label>
               <Select 
-                defaultValue={formData.status}
+                value={formData.status}
                 onValueChange={(value) => handleSelectChange('status', value)}
+                disabled={isSubmitting}
               >
                 <SelectTrigger className="neuro-inset focus:shadow-none">
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="new">New Lead</SelectItem>
                   <SelectItem value="contacted">Contacted</SelectItem>
-                  <SelectItem value="qualified">Qualified</SelectItem>
-                  <SelectItem value="proposal">Proposal</SelectItem>
-                  <SelectItem value="negotiation">Negotiation</SelectItem>
+                  <SelectItem value="viewing scheduled">Viewing Scheduled</SelectItem>
+                  <SelectItem value="offer made">Offer Made</SelectItem>
+                  <SelectItem value="negotiation">In Negotiation</SelectItem>
                   <SelectItem value="closed">Closed</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="source">Source</Label>
-              <Select 
-                defaultValue={formData.source}
-                onValueChange={(value) => handleSelectChange('source', value)}
-              >
-                <SelectTrigger className="neuro-inset focus:shadow-none">
-                  <SelectValue placeholder="Select source" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Website">Website</SelectItem>
-                  <SelectItem value="Referral">Referral</SelectItem>
-                  <SelectItem value="Social Media">Social Media</SelectItem>
-                  <SelectItem value="Email Campaign">Email Campaign</SelectItem>
-                  <SelectItem value="Cold Call">Cold Call</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="notes">Notes & Preferences</Label>
+              <Textarea
+                id="notes"
+                name="notes"
+                className="neuro-inset focus:shadow-none"
+                rows={3}
+                value={formData.notes}
+                onChange={handleChange}
+                disabled={isSubmitting}
+              />
             </div>
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
-            <Textarea
-              id="notes"
-              name="notes"
-              className="neuro-inset focus:shadow-none"
-              rows={3}
-            />
-          </div>
-          
-          <DialogFooter>
-            <Button 
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              className="neuro hover:shadow-none transition-all duration-300"
-            >
-              Cancel
-            </Button>
-            <Button 
-              type="submit"
-              className="neuro hover:shadow-none transition-all duration-300"
-            >
-              {lead ? 'Update Lead' : 'Add Lead'}
-            </Button>
-          </DialogFooter>
-        </form>
+          </form>
+        </div>
+        
+        <DialogFooter className="px-6 pb-6 pt-4 flex-none border-t">
+          <Button 
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            className="neuro hover:shadow-none transition-all duration-300"
+            disabled={isSubmitting}
+          >
+            Cancel
+          </Button>
+          <Button 
+            type="submit"
+            className="neuro hover:shadow-none transition-all duration-300"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <span className="flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {lead ? 'Updating...' : 'Creating...'}
+              </span>
+            ) : lead ? 'Update Lead' : 'Add Lead'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
+      <PlanModal isOpen={showModal} onClose={() => setShowModal(false)} />
+
     </Dialog>
   );
 };

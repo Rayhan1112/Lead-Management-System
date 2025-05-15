@@ -26,10 +26,10 @@ export const SettingsTabs = () => {
           <Bell className="h-4 w-4 mr-2" />
           {isMobile ? '' : 'Notifications'}
         </TabsTrigger>
-        <TabsTrigger value="appearance" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
+        {/* <TabsTrigger value="appearance" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <Palette className="h-4 w-4 mr-2" />
           {isMobile ? '' : 'Appearance'}
-        </TabsTrigger>
+        </TabsTrigger> */}
         <TabsTrigger value="storage" className="data-[state=active]:neuro-inset py-2 px-4 flex items-center">
           <Database className="h-4 w-4 mr-2" />
           {isMobile ? '' : 'Storage'}
@@ -69,9 +69,9 @@ export const SettingsTabs = () => {
         <NotificationSettings />
       </TabsContent>
 
-      <TabsContent value="appearance">
+      {/* <TabsContent value="appearance">
         <ThemeSettings />
-      </TabsContent>
+      </TabsContent> */}
 
       <TabsContent value="storage">
         <StorageSettings />

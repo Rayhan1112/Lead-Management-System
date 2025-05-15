@@ -1,18 +1,74 @@
-
-import React, { useState } from 'react';
-import { format, startOfToday, eachDayOfInterval, endOfMonth, startOfMonth, isToday, isSameMonth, addMonths, subMonths } from 'date-fns';
+import React, { useState, useEffect } from 'react';
+import { format, startOfToday, eachDayOfInterval, endOfMonth, startOfMonth, isToday, isSameMonth, addMonths, subMonths, parseISO } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { mockMeetings } from '@/lib/mockData';
+import { getDatabase, ref, onValue } from 'firebase/database';
+import { database } from '../../firebase';
+import { useAuth } from '@/context/AuthContext';
+
+interface Meeting {
+  id: string;
+  startDate: string;
+  startTime?: string;
+  duration?: string;
+  title: string;
+  status?: 'scheduled' | 'ongoing' | 'completed' | 'cancelled';
+}
 
 export const EnhancedCalendar: React.FC = () => {
+  const { isAdmin, user } = useAuth();
+  const adminId = localStorage.getItem('adminkey');
+  const agentId = localStorage.getItem('agentkey') || user?.uid;
+  
   const today = startOfToday();
   const [currentMonth, setCurrentMonth] = useState(today);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showMeetings, setShowMeetings] = useState(false);
-  
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchMeetings = () => {
+      if (!adminId) return;
+
+      let meetingsRef;
+      
+      if (isAdmin) {
+        meetingsRef = ref(database, `users/${adminId}/meetingdetails`);
+      } else {
+        if (!agentId) return;
+        meetingsRef = ref(database, `users/${adminId}/agents/${agentId}/meetingdetails`);
+      }
+
+      onValue(meetingsRef, (snapshot) => {
+        const meetingsData = snapshot.val();
+        const meetingsList: Meeting[] = [];
+
+        if (meetingsData) {
+          Object.keys(meetingsData).forEach((meetingId) => {
+            const meeting = meetingsData[meetingId];
+            if (meeting.startDate) {
+              meetingsList.push({ 
+                id: meetingId,
+                ...meeting
+              });
+            }
+          });
+        }
+
+        setMeetings(meetingsList);
+        setLoading(false);
+      }, (error) => {
+        console.error("Error fetching meetings:", error);
+        setLoading(false);
+      });
+    };
+
+    fetchMeetings();
+  }, [adminId, agentId, isAdmin]);
+
   const firstDayOfMonth = startOfMonth(currentMonth);
   const lastDayOfMonth = endOfMonth(currentMonth);
   const days = eachDayOfInterval({ start: firstDayOfMonth, end: lastDayOfMonth });
@@ -25,9 +81,10 @@ export const EnhancedCalendar: React.FC = () => {
     setCurrentMonth(subMonths(currentMonth, 1));
   };
 
-  // Get meetings for the day
+  // Get meetings for the specific date
   const getMeetingsForDate = (date: Date) => {
-    return mockMeetings.filter(meeting => meeting.startDate === format(date, 'yyyy-MM-dd'));
+    const dateString = format(date, 'yyyy-MM-dd');
+    return meetings.filter(meeting => meeting.startDate === dateString);
   };
 
   const handleDayClick = (date: Date) => {
@@ -121,25 +178,33 @@ export const EnhancedCalendar: React.FC = () => {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {selectedDateMeetings.map((meeting) => (
-              <div key={meeting.id} className="neuro p-3 space-y-2">
-                <h3 className="font-medium">{meeting.title}</h3>
-                <p className="text-sm text-muted-foreground">
-                  Time: {meeting.startTime} ({meeting.duration} mins)
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Status: <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    meeting.status === 'scheduled' 
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300' 
-                      : meeting.status === 'ongoing'
-                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
-                      : meeting.status === 'completed'
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
-                      : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
-                  }`}>{meeting.status}</span>
-                </p>
-              </div>
-            ))}
+            {selectedDateMeetings.length > 0 ? (
+              selectedDateMeetings.map((meeting) => (
+                <div key={meeting.id} className="neuro p-3 space-y-2">
+                  <h3 className="font-medium">{meeting.title}</h3>
+                  {meeting.startTime && (
+                    <p className="text-sm text-muted-foreground">
+                      Time: {meeting.startTime} {meeting.duration && `(${meeting.duration} mins)`}
+                    </p>
+                  )}
+                  {meeting.status && (
+                    <p className="text-sm text-muted-foreground">
+                      Status: <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        meeting.status === 'scheduled' 
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300' 
+                          : meeting.status === 'ongoing'
+                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
+                          : meeting.status === 'completed'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
+                          : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
+                      }`}>{meeting.status}</span>
+                    </p>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-center text-muted-foreground">No meetings scheduled for this day</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>
