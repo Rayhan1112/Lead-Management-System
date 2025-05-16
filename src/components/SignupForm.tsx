@@ -56,7 +56,7 @@ export const SignupForm: React.FC = () => {
       });
     } catch (error: any) {
       toast.error(error.message || 'Signup failed');
-    }
+    } 
   };
 
   return (
