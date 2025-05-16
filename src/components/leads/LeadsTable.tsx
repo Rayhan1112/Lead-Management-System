@@ -69,7 +69,9 @@ export const LeadsTable: React.FC = () => {
   const { isAdmin } = useAuth();
   const [currentAgentRange, setCurrentAgentRange] = useState<{from: number, to: number} | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const isAgent = false;
+  const isAgent = true;
+  const [userRole, setUserRole] = useState<string | null>(null);
+const [showAddLeadButton, setShowAddLeadButton] = useState(true);
 
   
   // Bulk selection state
@@ -84,18 +86,29 @@ export const LeadsTable: React.FC = () => {
   const [isBulkScheduling, setIsBulkScheduling] = useState(false);
   const [mobileSelectMode, setMobileSelectMode] = useState(false);
   const [leadLimit, setLeadLimit] = useState<number | null>(null);
+  const roleRef = ref(database, `users/${adminId}/agetns/${agentId}/role`);
 
   // Fetch leads and limit from Firebase
+  
   useEffect(() => {
     if (!adminId) return;
-
+  
     const leadsRef = ref(database, `users/${adminId}/leads`);
     const leadLimitRef = ref(database, `users/${adminId}/leadLimit`);
-
+    const roleRef = ref(database, `users/${adminId}/agetns/${agentId}/role`);
+  
+    // Get role first
+    const unsubscribeRole = onValue(roleRef, (snapshot) => {
+      const role = snapshot.val();
+      setUserRole(role);
+      setShowAddLeadButton(role !== "agent"); // Hide if agent
+    });
+  
+    // Get leads
     const unsubscribeLeads = onValue(leadsRef, (snapshot) => {
       const leadsData = snapshot.val();
       const allLeads: Lead[] = [];
-
+  
       if (leadsData) {
         Object.keys(leadsData).forEach((pushKey) => {
           const leadData = leadsData[pushKey];
@@ -107,30 +120,27 @@ export const LeadsTable: React.FC = () => {
           }
         });
       }
-
+  
       setLeads(allLeads);
     });
-
+  
+    // Get lead limit
     const unsubscribeLimit = onValue(leadLimitRef, (snapshot) => {
       const limit = snapshot.val();
       setLeadLimit(limit);
-
-      // When lead limit is available, check the count against it
-      if (limit !== null && leads.length >= limit) {
-      }
     });
-
+  
     return () => {
       unsubscribeLeads();
       unsubscribeLimit();
+      unsubscribeRole();
     };
-  }, [adminId, leads.length, navigate]);
+  }, [adminId]);
 
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [leadsPerPage] = useState(10);
-  
 
   // Fetch leads from Firebase with lead range filtering
   useEffect(() => {
@@ -165,8 +175,8 @@ export const LeadsTable: React.FC = () => {
         const agentRef = ref(database, `users/${adminId}/agents/${agentId}`);
         onValue(agentRef, (agentSnapshot) => {
           const agentData = agentSnapshot.val();
-          const fromPosition = parseInt(agentData?.from || '1');
-          const toPosition = parseInt(agentData?.to || '30');
+          const fromPosition = parseInt(agentData?.from || '');
+          const toPosition = parseInt(agentData?.to || '');
           const safeFrom = Math.max(1, fromPosition);
           const safeTo = Math.min(allLeads.length, toPosition);
           
@@ -774,15 +784,15 @@ export const LeadsTable: React.FC = () => {
       {/* Actions and Search */}
       <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-         {!isAgent && (
-  <Button 
-    onClick={() => setIsAddingLead(true)}
-    className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
-  >
-    Add Lead
-  </Button>
-)}
-          
+        <Button
+  onClick={() => setIsAddingLead(true)}
+  className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
+  disabled={userRole === "agent"}
+  title={userRole === "agent" ? "You cannot create leads" : ""}
+>
+  Add Lead
+</Button>
+  
           <div className="flex flex-wrap gap-2 mt-2 sm:mt-0">
             <Popover>
               <PopoverTrigger asChild>
@@ -861,7 +871,6 @@ export const LeadsTable: React.FC = () => {
                 style={{ display: 'none' }} 
                 id="file-upload"
               />
-                {!isAgent && (
               <Button
                 variant="outline"
                 className="neuro hover:shadow-none transition-all duration-300"
@@ -870,7 +879,6 @@ export const LeadsTable: React.FC = () => {
                 <Upload className="h-4 w-4 mr-2" />
                 Import Leads
               </Button>
-                )}
             </div>
           </div>
         </div>

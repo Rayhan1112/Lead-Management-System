@@ -6,7 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Mic, Send, X, UploadCloud, Trash2, Edit, Plus, Mail, Phone, MessageSquare, ChevronDown, Download } from 'lucide-react';
+import { Mic, Send, X, UploadCloud, Trash2, Edit, Plus, Mail, Phone, MessageSquare, ChevronDown, Download,Bot } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeadForm } from '../leads/LeadForm';
 import { FileManager } from '@/components/common/FileManager';
@@ -1171,7 +1171,7 @@ export const AIAssistant: React.FC = () => {
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 h-14 w-14 rounded-full neuro shadow-lg z-50"
         >
-          <Plus className="h-6 w-6" />
+          <Bot className="h-14 w-14" />
         </Button>
       )}
 
