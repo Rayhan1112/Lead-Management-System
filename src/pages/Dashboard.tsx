@@ -130,8 +130,8 @@ const Dashboard: React.FC = () => {
           const agentData = agentSnapshot.val();
           
           // Get the position range (1-based index)
-          const fromPosition = parseInt(agentData?.from || '1');
-          const toPosition = parseInt(agentData?.to || '30');
+          const fromPosition = parseInt(agentData?.from || '0');
+          const toPosition = parseInt(agentData?.to || '0');
           
           // Validate range
           const safeFrom = Math.max(1, fromPosition);

@@ -6,14 +6,13 @@ import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import Swal from 'sweetalert2';
 
-
 export const SignupForm: React.FC = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<'admin' | 'agent'>('agent');
+  const [role, setRole] = useState<'admin' | 'agent'>('admin'); // Changed default to 'admin'
   const { signup } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,7 +48,7 @@ export const SignupForm: React.FC = () => {
         agentLimit
       );
       Swal.fire({
-        title: 'Admin Created Sucessfully!',
+        title: 'Admin Created Successfully!',
         text: 'Account Created',
         icon: 'success',
         confirmButtonText: 'OK'

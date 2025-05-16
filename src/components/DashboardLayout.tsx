@@ -36,7 +36,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
   const isMobile = useIsMobile();
 
   // User details
-  const userName = user?.firstName || 'User';
+  const userName = user?.firstName || 'User ';
   const userEmail = user?.email || '';
   const userInitial = userName.charAt(0).toUpperCase();
   const userRole = user?.role === 'admin' ? 'Admin' : 'agent';
@@ -194,7 +194,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
                   </AvatarFallback>
                 </Avatar>
                 <span className="hidden md:inline text-sm font-medium dark:text-white">
-                  {user.firstName} ({user.role.toLocaleUpperCase()})
+                  {userEmail} ({user.role.toLocaleUpperCase()})
                 </span>
               </Button>
               
