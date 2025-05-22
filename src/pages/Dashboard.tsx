@@ -6,11 +6,12 @@ import { ChartSelector } from '@/components/dashboard/ChartSelector';
 import { ActionCards } from '@/components/dashboard/ActionCards';
 import { FileText, Users, Phone, Calendar as CalendarIcon, RefreshCw } from 'lucide-react';
 import { EnhancedCalendar } from '@/components/dashboard/EnhancedCalendar';
-import { getDatabase, ref, onValue } from 'firebase/database';
+import { getDatabase, ref, onValue, update } from 'firebase/database';
 import { isToday, isAfter, parseISO, startOfToday } from 'date-fns';
 import { database } from '../firebase';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { decryptObject } from '@/lib/utils';
 
 interface Meeting {
   id: string;
@@ -39,40 +40,71 @@ const Dashboard: React.FC = () => {
   const adminId = localStorage.getItem('adminkey');
   const agentId = localStorage.getItem('agentkey') || user?.uid;
   const userId = isAdmin ? adminId : agentId;
+  useEffect(() => {
+    const agentId = localStorage.getItem('agentKey');
+    const adminId = localStorage.getItem('adminKey');
+  
+    const handleLogoutTime = async () => {
+      if (!agentId || !adminId) return;
+  
+      const logoutRef = ref(database, `users/${adminId}/agents/${agentId}`);
+      const now = new Date().toLocaleString(); // or toISOString()
+      try {
+        await update(logoutRef, {
+          logoutTime: now
+        });
+      } catch (error) {
+        console.error('Failed to update logout time:', error);
+      }
+    };
+  
+    // Fires on tab close or browser refresh
+    window.addEventListener('beforeunload', handleLogoutTime);
+  
+    return () => {
+      window.removeEventListener('beforeunload', handleLogoutTime);
+    };
+  }, []);
+  
 
   const fetchMeetings = () => {
     if (!adminId) return;
-
+  
     let meetingsRef;
-    
+  
     if (isAdmin) {
       meetingsRef = ref(database, `users/${adminId}/meetingdetails`);
     } else {
       if (!agentId) return;
       meetingsRef = ref(database, `users/${adminId}/agents/${agentId}/meetingdetails`);
     }
-
-    onValue(meetingsRef, (snapshot) => {
+  
+    onValue(meetingsRef, async (snapshot) => {
       const meetingsData = snapshot.val();
       let todaysCount = 0;
       let upcomingCount = 0;
       const meetingsList: Meeting[] = [];
       const today = startOfToday();
-
+  
       if (meetingsData) {
-        Object.keys(meetingsData).forEach((meetingId) => {
-          const meeting = meetingsData[meetingId];
-          
-          if (meeting.startDate) {
+        const meetingEntries = await Promise.all(
+          Object.entries(meetingsData).map(async ([meetingId, encryptedMeeting]: any) => {
+            try {
+              const decryptedMeeting = await decryptObject(encryptedMeeting);
+              return { id: meetingId, ...decryptedMeeting };
+            } catch (err) {
+              console.error("Decryption failed for meeting:", meetingId, err);
+              return null;
+            }
+          })
+        );
+  
+        meetingEntries.forEach((meeting) => {
+          if (meeting && meeting.startDate) {
             try {
               const meetingDate = parseISO(meeting.startDate);
-              const meetingWithId = { 
-                id: meetingId,
-                ...meeting 
-              };
-              
-              meetingsList.push(meetingWithId);
-              
+              meetingsList.push(meeting);
+  
               if (isToday(meetingDate)) {
                 todaysCount++;
               } else if (isAfter(meetingDate, today)) {
@@ -84,12 +116,12 @@ const Dashboard: React.FC = () => {
           }
         });
       }
-
+  
       setMeetings(meetingsList);
-      setStats(prev => ({ 
-        ...prev, 
+      setStats(prev => ({
+        ...prev,
         todaysMeetings: todaysCount,
-        upcomingMeetings: upcomingCount
+        upcomingMeetings: upcomingCount,
       }));
     }, (error) => {
       console.error("Error fetching meetings:", error);
@@ -158,24 +190,27 @@ const Dashboard: React.FC = () => {
       }));
     });
   };
-
   const fetchCallsData = () => {
     if (!adminId) return;
   
     const leadsRef = ref(database, `users/${adminId}/leads`);
-    
-    onValue(leadsRef, (snapshot) => {
+  
+    onValue(leadsRef, async (snapshot) => {
       const leadsData = snapshot.val();
       let todaysCalls = 0;
       let upcomingCalls = 0;
       const today = startOfToday();
   
       if (leadsData) {
-        Object.values(leadsData).forEach((lead: any) => {
+        const decryptedLeads = await Promise.all(
+          Object.values(leadsData).map((lead: any) => decryptObject(lead))
+        );
+  
+        decryptedLeads.forEach((lead: any) => {
           if (lead.scheduledCall) {
             try {
               const callDate = parseISO(lead.scheduledCall);
-              
+  
               if (isToday(callDate)) {
                 todaysCalls++;
               } else if (isAfter(callDate, today)) {
@@ -187,15 +222,14 @@ const Dashboard: React.FC = () => {
           }
         });
   
-        setStats(prev => ({ 
-          ...prev, 
-          todaysCalls, 
-          upcomingCalls 
+        setStats(prev => ({
+          ...prev,
+          todaysCalls,
+          upcomingCalls,
         }));
       }
     });
   };
-
   const fetchData = () => {
     setLoading(true);
     setRefreshing(true);

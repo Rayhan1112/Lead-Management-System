@@ -13,6 +13,7 @@ export interface Lead {
 }
 
 export interface Agent {
+  lastLoggedIn: ReactNode;
   id: string;
   name: string;
   email: string;

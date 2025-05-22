@@ -13,7 +13,8 @@ import {
   CheckCircle,
   XCircle,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Activity // New icon for activity tab
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,13 +22,22 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from 'sonner';
 import { AgentForm } from './AgentForm';
 import { database } from '../../firebase';
-import { ref, onValue, remove } from 'firebase/database';
+import { ref, onValue, remove, update } from 'firebase/database';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import ActivityFeed from './AgentActivity';
+import { decryptObject, encryptObject } from '../../lib/utils';
 
 interface Agent {
   id: string;
@@ -44,6 +54,16 @@ interface Agent {
   };
   createdAt?: string;
   lastUpdated?: string;
+  lastLogin?: string;
+  logoutTime?: string;
+}
+
+interface AgentActivity {
+  id?: string;
+  agentId: string;
+  activityType: 'login' | 'logout' | 'lead_assigned' | 'lead_updated' | 'call' | 'email' | 'whatsapp';
+  activityDetails: string | Record<string, any>;
+  timestamp: string;
 }
 
 export const AgentCards: React.FC = () => {
@@ -54,8 +74,11 @@ export const AgentCards: React.FC = () => {
   const [viewingAgent, setViewingAgent] = useState<Agent | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [agentsPerPage] = useState(8); // Show 8 agents per page
+  const [agentsPerPage] = useState(8);
+  const [agentActivities, setAgentActivities] = useState<AgentActivity[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
 
+  // Fetch agents
   useEffect(() => {
     const fetchAgents = () => {
       try {
@@ -97,6 +120,82 @@ export const AgentCards: React.FC = () => {
     fetchAgents();
   }, []);
 
+  // Fetch activities when viewing agent changes
+  useEffect(() => {
+    if (!viewingAgent) return;
+
+    const fetchActivities = async () => {
+      try {
+        setLoadingActivities(true);
+        const adminKey = localStorage.getItem('adminkey');
+        if (!adminKey) return;
+
+        const activitiesRef = ref(database, `users/${adminKey}/agentActivities`);
+        
+        const unsubscribe = onValue(activitiesRef, async (snapshot) => {
+          const activitiesData = snapshot.val();
+          if (!activitiesData) {
+            setAgentActivities([]);
+            setLoadingActivities(false);
+            return;
+          }
+
+          const activityEntries = Object.entries(activitiesData);
+          const decryptedActivities = await Promise.all(
+            activityEntries.map(async ([id, encryptedActivity]) => {
+              try {
+                const decrypted = await decryptObject(encryptedActivity) as AgentActivity;
+                return {
+                  ...decrypted,
+                  id
+                };
+              } catch (error) {
+                console.error('Error decrypting activity:', error);
+                return null;
+              }
+            })
+          );
+
+          const filteredActivities = decryptedActivities
+            .filter((activity): activity is AgentActivity => activity !== null)
+            .filter(activity => activity.agentId === viewingAgent.id)
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+          setAgentActivities(filteredActivities);
+          setLoadingActivities(false);
+        });
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('Error fetching activities:', error);
+        setLoadingActivities(false);
+      }
+    };
+
+    fetchActivities();
+  }, [viewingAgent]);
+
+  // Log agent activity
+  const logAgentActivity = async (activity: Omit<AgentActivity, 'id' | 'timestamp'>) => {
+    try {
+      const adminKey = localStorage.getItem('adminkey');
+      if (!adminKey || !activity.agentId) return;
+
+      const activityData = {
+        ...activity,
+        timestamp: new Date().toISOString()
+      };
+
+      // Encrypt the activity data before storing
+      const encryptedActivity = await encryptObject(activityData);
+
+      const activitiesRef = ref(database, `users/${adminKey}/agentActivities`);
+      await push(activitiesRef, encryptedActivity);
+    } catch (error) {
+      console.error('Error logging activity:', error);
+    }
+  };
+
   // Filter agents based on search term
   const filteredAgents = agents.filter(agent => {
     return agent?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -135,6 +234,19 @@ export const AgentCards: React.FC = () => {
         return;
       }
 
+      // Log the deletion activity
+      if (viewingAgent) {
+        await logAgentActivity({
+          agentId: id,
+          activityType: 'status_change',
+          activityDetails: JSON.stringify({
+            action: 'agent_deleted',
+            deletedBy: adminKey,
+            timestamp: new Date().toISOString()
+          })
+        });
+      }
+
       const agentRef = ref(database, `users/${adminKey}/agents/${id}`);
       await remove(agentRef);
       toast.success('Agent removed successfully');
@@ -145,20 +257,35 @@ export const AgentCards: React.FC = () => {
     }
   };
 
-  const handleContactAction = (type: string, agent: Agent) => {
-    switch (type) {
-      case 'call':
-        window.open(`tel:${agent.phone}`, '_blank');
-        break;
-      case 'email':
-        window.open(`mailto:${agent.email}`, '_blank');
-        break;
-      case 'whatsapp':
-        const phoneNumber = agent.phone.replace(/\D/g, '');
-        window.open(`https://wa.me/${phoneNumber}`, '_blank');
-        break;
-      default:
-        break;
+  const handleContactAction = async (type: string, agent: Agent) => {
+    try {
+      // Log the contact activity
+      await logAgentActivity({
+        agentId: agent.id,
+        activityType: type as 'call' | 'email' | 'whatsapp',
+        activityDetails: JSON.stringify({
+          contactMethod: type,
+          timestamp: new Date().toISOString(),
+          initiatedBy: localStorage.getItem('adminkey') || 'admin'
+        })
+      });
+
+      switch (type) {
+        case 'call':
+          window.open(`tel:${agent.phone}`, '_blank');
+          break;
+        case 'email':
+          window.open(`mailto:${agent.email}`, '_blank');
+          break;
+        case 'whatsapp':
+          const phoneNumber = agent.phone.replace(/\D/g, '');
+          window.open(`https://wa.me/${phoneNumber}`, '_blank');
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      console.error('Error logging contact activity:', error);
     }
   };
 
@@ -167,14 +294,83 @@ export const AgentCards: React.FC = () => {
     setViewingAgent(null);
   };
 
-  const handleAddAgent = () => {
-    setIsAddingAgent(false);
-    toast.success('Agent added successfully');
+  const handleAddAgent = async (newAgent: Omit<Agent, 'id'>) => {
+    try {
+      const adminKey = localStorage.getItem('adminkey');
+      if (!adminKey) {
+        toast.error('User not authenticated');
+        return false;
+      }
+
+      // Encrypt the agent data
+      const encryptedAgent = await encryptObject({
+        ...newAgent,
+        createdAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      });
+
+      const agentsRef = ref(database, `users/${adminKey}/agents`);
+      const newAgentRef = push(agentsRef);
+      await set(newAgentRef, encryptedAgent);
+
+      // Log the agent creation activity
+      await logAgentActivity({
+        agentId: newAgentRef.key || 'new_agent',
+        activityType: 'status_change',
+        activityDetails: JSON.stringify({
+          action: 'agent_created',
+          createdBy: adminKey,
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      toast.success('Agent added successfully');
+      setIsAddingAgent(false);
+      return true;
+    } catch (error) {
+      console.error('Error adding agent:', error);
+      toast.error('Failed to add agent');
+      return false;
+    }
   };
 
-  const handleUpdateAgent = () => {
-    setEditingAgent(null);
-    toast.success('Agent updated successfully');
+  const handleUpdateAgent = async (updatedAgent: Agent) => {
+    try {
+      const adminKey = localStorage.getItem('adminkey');
+      if (!adminKey) {
+        toast.error('User not authenticated');
+        return false;
+      }
+
+      // Encrypt the updated agent data
+      const encryptedAgent = await encryptObject({
+        ...updatedAgent,
+        lastUpdated: new Date().toISOString()
+      });
+
+      const agentRef = ref(database, `users/${adminKey}/agents/${updatedAgent.id}`);
+      await update(agentRef, encryptedAgent);
+
+      // Log the agent update activity
+      await logAgentActivity({
+        agentId: updatedAgent.id,
+        activityType: 'status_change',
+        activityDetails: JSON.stringify({
+          action: 'agent_updated',
+          updatedBy: adminKey,
+          timestamp: new Date().toISOString(),
+          changes: Object.keys(updatedAgent)
+        })
+      });
+
+      toast.success('Agent updated successfully');
+      setEditingAgent(null);
+      return true;
+    } catch (error) {
+      console.error('Error updating agent:', error);
+      toast.error('Failed to update agent');
+      return false;
+    }
   };
 
   const handleCardClick = (agent: Agent) => {
@@ -262,6 +458,9 @@ export const AgentCards: React.FC = () => {
                 <div>
                   <p className="text-sm text-muted-foreground">{agent.email}</p>
                   <p className="text-sm text-muted-foreground">{agent.phone}</p>
+                  <br/>
+                  <p className="text-sm text-white">Last Login:<p className='text-red-500'>{agent.lastLogin}</p> </p>
+                  <p className="text-sm text-white">Last Logout:<p className='text-red-500'>{agent.logoutTime}</p> </p>
                 </div>
 
                 {agent.assignedLeads && (
@@ -275,7 +474,7 @@ export const AgentCards: React.FC = () => {
             ))}
           </div>
 
-          {/* Pagination controls - always shown */}
+          {/* Pagination controls */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-2 py-4">
             <div className="text-sm text-muted-foreground">
               Showing {indexOfFirstAgent + 1}-{Math.min(indexOfLastAgent, filteredAgents.length)} of {filteredAgents.length} agents
@@ -368,144 +567,207 @@ export const AgentCards: React.FC = () => {
                 </DialogTitle>
               </DialogHeader>
               
-              <div className="space-y-6">
-                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
-                  <Avatar className="h-24 w-24">
-                    <AvatarImage src={viewingAgent.avatar} alt={viewingAgent.name} />
-                    <AvatarFallback>{viewingAgent.name.charAt(0)}</AvatarFallback>
-                  </Avatar>
-                  <div className="text-center sm:text-left">
-                    <h2 className="text-2xl font-bold">{viewingAgent.name}</h2>
-                    <p className="text-lg text-muted-foreground">{viewingAgent.designation}</p>
-                    <div className="flex items-center justify-center sm:justify-start mt-2">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                        viewingAgent.status === 'active' 
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300' 
-                          : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
-                      }`}>
-                        {viewingAgent.status === 'active' ? (
-                          <CheckCircle className="h-4 w-4 mr-1" />
-                        ) : (
-                          <XCircle className="h-4 w-4 mr-1" />
-                        )}
-                        {viewingAgent.status.charAt(0).toUpperCase() + viewingAgent.status.slice(1)}
-                      </span>
+              <Tabs defaultValue="details" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="details">Details</TabsTrigger>
+                  <TabsTrigger value="activities">
+                    <Activity className="h-4 w-4 mr-2" />
+                    Activities
+                  </TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="details">
+                  <div className="space-y-6">
+                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+                      <Avatar className="h-24 w-24">
+                        <AvatarImage src={viewingAgent.avatar} alt={viewingAgent.name} />
+                        <AvatarFallback>{viewingAgent.name.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div className="text-center sm:text-left">
+                        <h2 className="text-2xl font-bold">{viewingAgent.name}</h2>
+                        <p className="text-lg text-muted-foreground">{viewingAgent.designation}</p>
+                        <div className="flex items-center justify-center sm:justify-start mt-2">
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                            viewingAgent.status === 'active' 
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300' 
+                              : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
+                          }`}>
+                            {viewingAgent.status === 'active' ? (
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                            ) : (
+                              <XCircle className="h-4 w-4 mr-1" />
+                            )}
+                            {viewingAgent.status.charAt(0).toUpperCase() + viewingAgent.status.slice(1)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center">
-                      <Mail className="h-5 w-5 mr-2 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Email</p>
-                        <p>{viewingAgent.email}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center">
+                          <Mail className="h-5 w-5 mr-2 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm text-muted-foreground">Email</p>
+                            <p>{viewingAgent.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                          <Smartphone className="h-5 w-5 mr-2 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm text-muted-foreground">Phone</p>
+                            <p>{viewingAgent.phone}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center">
+                          <Briefcase className="h-5 w-5 mr-2 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm text-muted-foreground">Designation</p>
+                            <p>{viewingAgent.designation}</p>
+                          </div>
+                        </div>
+                        {viewingAgent.birthDate && (
+                          <div className="flex items-center">
+                            <Calendar className="h-5 w-5 mr-2 text-muted-foreground" />
+                            <div>
+                              <p className="text-sm text-muted-foreground">Birth Date</p>
+                              <p>{new Date(viewingAgent.birthDate).toLocaleDateString()}</p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center">
-                      <Smartphone className="h-5 w-5 mr-2 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Phone</p>
-                        <p>{viewingAgent.phone}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center">
-                      <Briefcase className="h-5 w-5 mr-2 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Designation</p>
-                        <p>{viewingAgent.designation}</p>
-                      </div>
-                    </div>
-                    {viewingAgent.birthDate && (
-                      <div className="flex items-center">
-                        <Calendar className="h-5 w-5 mr-2 text-muted-foreground" />
-                        <div>
-                          <p className="text-sm text-muted-foreground">Birth Date</p>
-                          <p>{new Date(viewingAgent.birthDate).toLocaleDateString()}</p>
+
+                    {viewingAgent.assignedLeads && (
+                      <div className="bg-muted/50 p-4 rounded-lg">
+                        <h3 className="font-medium mb-2">Performance</h3>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="text-center">
+                            <p className="text-2xl font-bold">
+                              {viewingAgent.assignedLeads.from} - {viewingAgent.assignedLeads.to}
+                            </p>
+                            <p className="text-sm text-muted-foreground">Assigned Leads Range</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-2xl font-bold">
+                              {viewingAgent.assignedLeads.to - viewingAgent.assignedLeads.from}
+                            </p>
+                            <p className="text-sm text-muted-foreground">Total Leads</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-2xl font-bold">-</p>
+                            <p className="text-sm text-muted-foreground">Conversion Rate</p>
+                          </div>
                         </div>
                       </div>
                     )}
-                  </div>
-                </div>
 
-                {viewingAgent.assignedLeads && (
-                  <div className="bg-muted/50 p-4 rounded-lg">
-                    <h3 className="font-medium mb-2">Performance</h3>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="text-center">
-                        <p className="text-2xl font-bold">
-                          {viewingAgent.assignedLeads.from} - {viewingAgent.assignedLeads.to}
-                        </p>
-                        <p className="text-sm text-muted-foreground">Assigned Leads Range</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-2xl font-bold">
-                          {viewingAgent.assignedLeads.to - viewingAgent.assignedLeads.from}
-                        </p>
-                        <p className="text-sm text-muted-foreground">Total Leads</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-2xl font-bold">-</p>
-                        <p className="text-sm text-muted-foreground">Conversion Rate</p>
+                    <div className="flex justify-end space-x-2 pt-4">
+                      <Button 
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEdit(viewingAgent);
+                        }}
+                      >
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit Agent
+                      </Button>
+                      <div className="flex space-x-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleContactAction('call', viewingAgent);
+                          }}
+                          title="Call"
+                        >
+                          <Phone className="h-5 w-5" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleContactAction('email', viewingAgent);
+                          }}
+                          title="Email"
+                        >
+                          <Mail className="h-5 w-5" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleContactAction('whatsapp', viewingAgent);
+                          }}
+                          title="WhatsApp"
+                        >
+                          <MessageSquare className="h-5 w-5" />
+                        </Button>
                       </div>
                     </div>
                   </div>
-                )}
-
-                <div className="flex justify-end space-x-2 pt-4">
-                  <Button 
-                    variant="outline"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEdit(viewingAgent);
-                    }}
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Edit Agent
-                  </Button>
-                  <div className="flex space-x-1">
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="text-muted-foreground hover:text-foreground"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleContactAction('call', viewingAgent);
-                      }}
-                      title="Call"
-                    >
-                      <Phone className="h-5 w-5" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="text-muted-foreground hover:text-foreground"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleContactAction('email', viewingAgent);
-                      }}
-                      title="Email"
-                    >
-                      <Mail className="h-5 w-5" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="text-muted-foreground hover:text-foreground"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleContactAction('whatsapp', viewingAgent);
-                      }}
-                      title="WhatsApp"
-                    >
-                      <MessageSquare className="h-5 w-5" />
-                    </Button>
+                </TabsContent>
+                
+                <TabsContent value="activities">
+                  <div className="space-y-4">
+                    <DialogDescription>
+                      Recent activities for {viewingAgent.name}
+                    </DialogDescription>
+                    
+                    {loadingActivities ? (
+                      <div className="flex justify-center items-center h-32">
+                        Loading activities...
+                      </div>
+                    ) : agentActivities.length === 0 ? (
+                      <div className="text-center py-8">
+                        <p className="text-muted-foreground">No activities found</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {agentActivities.map((activity) => (
+                          <div key={activity.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                            <div className="flex-shrink-0 mt-1">
+                              {activity.activityType === 'login' && <CheckCircle className="h-5 w-5 text-green-500" />}
+                              {activity.activityType === 'logout' && <XCircle className="h-5 w-5 text-red-500" />}
+                              {activity.activityType === 'call' && <Phone className="h-5 w-5 text-blue-500" />}
+                              {activity.activityType === 'email' && <Mail className="h-5 w-5 text-purple-500" />}
+                              {activity.activityType === 'whatsapp' && <MessageSquare className="h-5 w-5 text-green-600" />}
+                              {activity.activityType === 'lead_assigned' && <User className="h-5 w-5 text-yellow-500" />}
+                              {activity.activityType === 'lead_updated' && <Edit className="h-5 w-5 text-orange-500" />}
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex justify-between items-start">
+                                <p className="font-medium capitalize">
+                                  {activity.activityType.replace('_', ' ')}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {new Date(activity.timestamp).toLocaleString()}
+                                </p>
+                              </div>
+                              {typeof activity.activityDetails === 'string' ? (
+                                <p className="text-sm mt-1">{activity.activityDetails}</p>
+                              ) : (
+                                <pre className="text-sm mt-1 overflow-x-auto">
+                                  {JSON.stringify(activity.activityDetails, null, 2)}
+                                </pre>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
+                </TabsContent>
+              </Tabs>
             </>
           )}
         </DialogContent>

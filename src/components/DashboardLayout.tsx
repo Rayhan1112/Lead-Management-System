@@ -34,9 +34,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isMobile = useIsMobile();
+  const agentName = localStorage.getItem('agentName');
 
   // User details
-  const userName = user?.firstName || 'User ';
+  const userName = user?.firstName || agentName || 'User ';
   const userEmail = user?.email || '';
   const userInitial = userName.charAt(0).toUpperCase();
   const userRole = user?.role === 'admin' ? 'Admin' : 'agent';
@@ -154,16 +155,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
         {/* Top Header */}
         <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 h-16 flex items-center justify-between px-4 lg:px-6 shrink-0">
           <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarOpen(true)}
-              className="md:hidden text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-              aria-label="Open sidebar"
-            >
-              <Menu size={20} />
-            </Button>
-            <h1 className="ml-4 text-lg font-semibold lg:text-xl dark:text-white">
+           
+            <h1 className="ml-0 text-lg font-semibold lg:text-xl dark:text-white">
               {userName}'s Workspace
             </h1>
           </div>
@@ -194,7 +187,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
                   </AvatarFallback>
                 </Avatar>
                 <span className="hidden md:inline text-sm font-medium dark:text-white">
-                  {userEmail} ({user.role.toLocaleUpperCase()})
+                  {userName} ({user.role.toLocaleUpperCase()})
                 </span>
               </Button>
               

@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
-import { 
-  Phone, Mail, MessageSquare, Edit, Trash2, Filter, Download, Upload, 
-  ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Calendar as CalendarIcon, 
-  Check, CheckCircle, Circle, Clock, X, CheckSquare, Square 
+import {
+  Phone, Mail, MessageSquare, Edit, Trash2, Filter, Download, Upload,
+  ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Calendar as CalendarIcon,
+  Check, CheckCircle, Circle, Clock, X, CheckSquare, Square
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,20 +12,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { database } from '../../firebase';
-import { onValue, remove, update, query, orderByChild, startAt, endAt } from 'firebase/database';
+import { onValue, remove, update, query, orderByChild, startAt, endAt, get, ref, push, set } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { LeadForm } from './LeadForm';
 import { FileManager } from '@/components/common/FileManager';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { LeadDetails } from './LeadDetails';
 import * as XLSX from 'xlsx';
-import { ref, push, set } from 'firebase/database';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
-import PlanModal from '@/pages/PlanModel';
+import { decryptObject, encryptObject, encryptValue } from '@/lib/utils';
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { logAgentActivity } from '../../lib/activityLogger';
 
 interface Lead {
   id: string;
@@ -46,12 +46,58 @@ interface Lead {
   status: string;
   notes: string;
   preferredContactMethod: string;
-  createdAt: string;
   updatedAt: string;
   leadNumber?: number;
   scheduledCall?: string;
 }
+type AgentActivity = {
+  agentId: string;
+  leadId: string;
+  activityType: 'view' | 'call' | 'email' | 'whatsapp' | 'edit' | 'status_change' | 'delete' | 'schedule_call' | 'bulk_action';
+  activityDetails: string;
+  timestamp: string;
+  metadata?: Record<string, any>;
+};
 
+// Add these helper functions near your other utility functions
+const logLeadAction = async (
+  adminId: string,
+  agentId: string,
+  leadId: string | string[],
+  activityType: AgentActivity['activityType'],
+  details: Record<string, any> = {}
+) => {
+  const leadIds = Array.isArray(leadId) ? leadId : [leadId];
+  
+  await Promise.all(leadIds.map(async (id) => {
+    await logAgentActivity(adminId, {
+      agentId,
+      leadId: id,
+      activityType,
+      activityDetails: details,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        actionCount: leadIds.length,
+        isBulk: leadIds.length > 1
+      }
+    });
+  }));
+};
+
+const logViewActivity = async (adminId: string, agentId: string, lead: Lead) => {
+  await logLeadAction(adminId, agentId, lead.id, 'view', {
+    leadName: `${lead.firstName} ${lead.lastName}`,
+    status: lead.status
+  });
+};
+
+const logEditActivity = async (adminId: string, agentId: string, lead: Lead, changes: Record<string, any>) => {
+  await logLeadAction(adminId, agentId, lead.id, 'edit', {
+    leadName: `${lead.firstName} ${lead.lastName}`,
+    changes,
+    previousData: lead
+  });
+};
 export const LeadsTable: React.FC = () => {
   const adminId = localStorage.getItem('adminkey');
   const agentId = localStorage.getItem('agentkey');
@@ -67,129 +113,106 @@ export const LeadsTable: React.FC = () => {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const isMobile = useIsMobile();
   const { isAdmin } = useAuth();
-  const [currentAgentRange, setCurrentAgentRange] = useState<{from: number, to: number} | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const isAgent = true;
-  const [userRole, setUserRole] = useState<string | null>(null);
-const [showAddLeadButton, setShowAddLeadButton] = useState(true);
 
-  
+  const [currentAgentRange, setCurrentAgentRange] = useState<{ from: number, to: number } | null>(null);
+
   // Bulk selection state
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [isSelectAll, setIsSelectAll] = useState(false);
   const [showBulkActions, setShowBulkActions] = useState(false);
-  
+
   // Call scheduling state
   const [showScheduleCall, setShowScheduleCall] = useState(false);
   const [callScheduleDate, setCallScheduleDate] = useState<Date | undefined>(new Date());
   const [callScheduleTime, setCallScheduleTime] = useState('09:00');
   const [isBulkScheduling, setIsBulkScheduling] = useState(false);
   const [mobileSelectMode, setMobileSelectMode] = useState(false);
-  const [leadLimit, setLeadLimit] = useState<number | null>(null);
-  const roleRef = ref(database, `users/${adminId}/agetns/${agentId}/role`);
 
-  // Fetch leads and limit from Firebase
-  
-  useEffect(() => {
-    if (!adminId) return;
-  
-    const leadsRef = ref(database, `users/${adminId}/leads`);
-    const leadLimitRef = ref(database, `users/${adminId}/leadLimit`);
-    const roleRef = ref(database, `users/${adminId}/agetns/${agentId}/role`);
-  
-    // Get role first
-    const unsubscribeRole = onValue(roleRef, (snapshot) => {
-      const role = snapshot.val();
-      setUserRole(role);
-      setShowAddLeadButton(role !== "agent"); // Hide if agent
-    });
-  
-    // Get leads
-    const unsubscribeLeads = onValue(leadsRef, (snapshot) => {
-      const leadsData = snapshot.val();
-      const allLeads: Lead[] = [];
-  
-      if (leadsData) {
-        Object.keys(leadsData).forEach((pushKey) => {
-          const leadData = leadsData[pushKey];
-          if (leadData) {
-            allLeads.push({
-              id: pushKey,
-              ...leadData,
-            });
-          }
-        });
-      }
-  
-      setLeads(allLeads);
-    });
-  
-    // Get lead limit
-    const unsubscribeLimit = onValue(leadLimitRef, (snapshot) => {
-      const limit = snapshot.val();
-      setLeadLimit(limit);
-    });
-  
-    return () => {
-      unsubscribeLeads();
-      unsubscribeLimit();
-      unsubscribeRole();
-    };
-  }, [adminId]);
-
-  
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [leadsPerPage] = useState(10);
 
-  // Fetch leads from Firebase with lead range filtering
+
   useEffect(() => {
     if (!adminId) return;
-
-    const leadsRef = ref(database, `users/${adminId}/leads`);
-
-    const unsubscribe = onValue(leadsRef, (snapshot) => {
-      const leadsData = snapshot.val();
-      const allLeads: Lead[] = [];
-      
-      if (leadsData) {
-        Object.keys(leadsData).forEach((pushKey) => {
-          const leadData = leadsData[pushKey];
-          if (leadData) {
-            allLeads.push({
-              id: pushKey,
-              ...leadData,
-              position: allLeads.length + 1
+  
+    const fetchAndDecryptLeads = async () => {
+      const leadsRef = ref(database, `users/${adminId}/leads`);
+  
+      onValue(leadsRef, async (snapshot) => {
+        const leadsData = snapshot.val();
+  
+        if (!leadsData) {
+          setLeads([]);
+          return;
+        }
+  
+        try {
+          const leadEntries = Object.entries(leadsData);
+  
+          // Decrypt each lead
+          const decryptedLeads = await Promise.all(
+            leadEntries.map(async ([pushKey, encryptedLead]) => {
+              try {
+                const decrypted = await decryptObject(encryptedLead) as Lead;
+  
+                if (!decrypted) {
+                  console.warn(`Invalid lead data for: ${pushKey}`);
+                  return null;
+                }
+  
+                return {
+                  ...decrypted,
+                  id: pushKey
+                };
+              } catch (error) {
+                console.error('Error decrypting lead:', pushKey, error);
+                return null;
+              }
+            })
+          );
+  
+          // Filter out null entries and assign position
+          const validLeads = decryptedLeads
+            .filter((lead): lead is Lead => lead !== null)
+            .map((lead, index) => ({
+              ...lead,
+              position: index + 1,
+            }));
+  
+          console.log("✅ Decrypted Leads:", validLeads);
+  
+          if (isAdmin) {
+            setLeads(validLeads);
+          } else {
+            if (!agentId) return;
+  
+            const agentRef = ref(database, `users/${adminId}/agents/${agentId}`);
+            onValue(agentRef, (agentSnapshot) => {
+              const agentData = agentSnapshot.val();
+              const fromPosition = parseInt(agentData?.from || 'NaN');
+              const toPosition = parseInt(agentData?.to || '0');
+              const safeFrom = Math.max(1, fromPosition);
+              const safeTo = Math.min(validLeads.length, toPosition);
+  
+              setCurrentAgentRange({ from: safeFrom, to: safeTo });
+  
+              const slicedLeads = validLeads.slice(safeFrom - 1, safeTo);
+              setLeads(slicedLeads);
+              setCurrentPage(1);
             });
           }
-        });
-      }
-
-      allLeads.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-
-      if (isAdmin) {
-        setLeads(allLeads);
-      } else {
-        if (!agentId) return;
-
-        const agentRef = ref(database, `users/${adminId}/agents/${agentId}`);
-        onValue(agentRef, (agentSnapshot) => {
-          const agentData = agentSnapshot.val();
-          const fromPosition = parseInt(agentData?.from || '');
-          const toPosition = parseInt(agentData?.to || '');
-          const safeFrom = Math.max(1, fromPosition);
-          const safeTo = Math.min(allLeads.length, toPosition);
-          
-          setCurrentAgentRange({ from: safeFrom, to: safeTo });
-          const slicedLeads = allLeads.slice(safeFrom - 1, safeTo);
-          setLeads(slicedLeads);
-          setCurrentPage(1);
-        });
-      }
-    });
-
-    return () => unsubscribe();
+        } catch (err) {
+          console.error("❌ Unexpected error while processing leads:", err);
+          setLeads([]);
+        }
+      });
+    };
+  
+    fetchAndDecryptLeads();
   }, [adminId, agentId, isAdmin]);
+  
+
 
   // Reset bulk selection when leads change
   useEffect(() => {
@@ -213,9 +236,10 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
 
     const matchesSearch = searchFields.includes(searchTerm.toLowerCase());
     const matchesStatus = selectedStatus ? lead.status === selectedStatus : true;
-    const matchesSource = selectedSource && selectedSource !== 'all' 
-    ? lead.source === selectedSource 
-    : true;    
+    const matchesSource = selectedSource && selectedSource !== 'all'
+      ? lead.source === selectedSource
+      : true;
+
     return matchesSearch && matchesStatus && matchesSource;
   });
 
@@ -232,87 +256,138 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
   const lastPage = () => setCurrentPage(totalPages);
 
   // Bulk selection handlers
-  const toggleSelectAll = () => {
-    if (isSelectAll) {
-      setSelectedLeads([]);
-    } else {
-      setSelectedLeads(currentLeads.map(lead => lead.id));
-    }
-    setIsSelectAll(!isSelectAll);
-  };
+  // Modify your bulk selection handlers
+const toggleSelectAll = async () => {
+  if (isSelectAll) {
+    setSelectedLeads([]);
+  } else {
+    setSelectedLeads(currentLeads.map(lead => lead.id));
+  }
+  setIsSelectAll(!isSelectAll);
 
-  const toggleSelectLead = (leadId: string) => {
-    setSelectedLeads(prev => 
-      prev.includes(leadId) 
-        ? prev.filter(id => id !== leadId) 
-        : [...prev, leadId]
-    );
-  };
+  if (adminId && agentId) {
+    await logAgentActivity(adminId, {
+      agentId,
+      leadId: 'bulk_action',
+      activityType: 'bulk_action',
+      activityDetails: {
+        action: isSelectAll ? 'deselect_all' : 'select_all',
+        count: isSelectAll ? 0 : currentLeads.length
+      },
+      timestamp: new Date().toISOString()
+    });
+  }
+};
 
+const toggleSelectLead = async (leadId: string) => {
+  setSelectedLeads(prev =>
+    prev.includes(leadId)
+      ? prev.filter(id => id !== leadId)
+      : [...prev, leadId]
+  );
+
+  if (adminId && agentId) {
+    await logAgentActivity(adminId, {
+      agentId,
+      leadId,
+      activityType: 'bulk_action',
+      activityDetails: {
+        action: selectedLeads.includes(leadId) ? 'deselect' : 'select'
+      },
+      timestamp: new Date().toISOString()
+    });
+  }
+};
   // Bulk actions
   const handleBulkStatusChange = async (newStatus: string) => {
-    if (!adminId || selectedLeads.length === 0) return;
-
+    if (!adminId || selectedLeads.length === 0 || !agentId) return;
+  
     try {
-      const updatePromises = selectedLeads.map(leadId => 
-        update(ref(database, `users/${adminId}/leads/${leadId}`), { 
-          status: newStatus,
-          updatedAt: new Date().toISOString()
-        })
-      );
-
-      await Promise.all(updatePromises);
-      toast.success(`${selectedLeads.length} leads updated to ${newStatus}`);
+      const encryptedStatus = await encryptValue(newStatus);
+      const encryptedUpdatedAt = await encryptValue(new Date().toISOString());
+  
+      const updates = selectedLeads.reduce((acc, leadId) => ({
+        ...acc,
+        [`users/${adminId}/leads/${leadId}/status`]: encryptedStatus,
+        [`users/${adminId}/leads/${leadId}/updatedAt`]: encryptedUpdatedAt
+      }), {});
+  
+      await update(ref(database), updates);
+      
+      // Log the bulk status change
+      await logLeadAction(adminId, agentId, selectedLeads, 'status_change', {
+        newStatus,
+        leadCount: selectedLeads.length
+      });
+  
+      toast.success(`${selectedLeads.length} leads updated`);
       setSelectedLeads([]);
       setIsSelectAll(false);
     } catch (error) {
       toast.error('Failed to update leads');
-      console.error('Error updating leads:', error);
+      console.error('Bulk update error:', error);
     }
   };
-
   const handleBulkDelete = async () => {
-    if (!adminId || selectedLeads.length === 0 || !window.confirm(`Are you sure you want to delete ${selectedLeads.length} leads?`)) return;
-
+    if (!isAdmin) {
+      toast.error("You do not have permission to delete leads");
+      return;
+    }
+  
+    if (!adminId || !agentId || selectedLeads.length === 0 || !window.confirm(`Are you sure you want to delete ${selectedLeads.length} leads?`)) return;
+  
     try {
-      const deletePromises = selectedLeads.map(leadId => 
+      // First log the deletion activity
+      await logLeadAction(adminId, agentId, selectedLeads, 'delete', {
+        leadCount: selectedLeads.length
+      });
+  
+      const deletePromises = selectedLeads.map(leadId =>
         remove(ref(database, `users/${adminId}/leads/${leadId}`))
       );
-
+  
       await Promise.all(deletePromises);
-      toast.success(`${selectedLeads.length} leads deleted successfully`);
+      toast.success(`${selectedLeads.length} leads deleted`);
       setSelectedLeads([]);
       setIsSelectAll(false);
-      
-      // Reset to first page if current page would be empty
+  
       if (currentLeads.length === selectedLeads.length && currentPage > 1) {
         setCurrentPage(currentPage - 1);
       }
     } catch (error) {
       toast.error('Failed to delete leads');
-      console.error('Error deleting leads:', error);
+      console.error('Bulk delete error:', error);
     }
   };
-
   // Call scheduling
   const handleScheduleCall = async () => {
-    if (!adminId || !callScheduleDate) return;
-
+    if (!adminId || !agentId || !callScheduleDate) return;
+  
     const leadIds = isBulkScheduling ? selectedLeads : [selectedLead?.id].filter(Boolean) as string[];
     if (leadIds.length === 0) return;
-
+  
     try {
       const scheduleDateTime = `${format(callScheduleDate, 'yyyy-MM-dd')}T${callScheduleTime}`;
-      const updatePromises = leadIds.map(leadId => 
-        update(ref(database, `users/${adminId}/leads/${leadId}`), { 
-          scheduledCall: scheduleDateTime,
-          updatedAt: new Date().toISOString()
-        })
-      );
-
-      await Promise.all(updatePromises);
-      const message = leadIds.length === 1 
-        ? 'Call scheduled successfully' 
+      const encryptedSchedule = await encryptValue(scheduleDateTime);
+      const encryptedUpdatedAt = await encryptValue(new Date().toISOString());
+  
+      const updates = leadIds.reduce((acc, leadId) => ({
+        ...acc,
+        [`users/${adminId}/leads/${leadId}/scheduledCall`]: encryptedSchedule,
+        [`users/${adminId}/leads/${leadId}/updatedAt`]: encryptedUpdatedAt
+      }), {});
+  
+      await update(ref(database), updates);
+  
+      // Log the scheduling activity
+      await logLeadAction(adminId, agentId, leadIds, 'schedule_call', {
+        scheduleDateTime,
+        leadCount: leadIds.length,
+        isBulk: isBulkScheduling
+      });
+  
+      const message = leadIds.length === 1
+        ? 'Call scheduled successfully'
         : `${leadIds.length} calls scheduled successfully`;
       toast.success(message);
       setShowScheduleCall(false);
@@ -341,8 +416,9 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
     setIsBulkScheduling(true);
     setShowScheduleCall(true);
   };
-   // Toggle mobile selection mode
-   const toggleMobileSelectMode = () => {
+
+  // Toggle mobile selection mode
+  const toggleMobileSelectMode = () => {
     setMobileSelectMode(!mobileSelectMode);
     if (mobileSelectMode) {
       setSelectedLeads([]);
@@ -352,11 +428,69 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
 
   // Toggle lead selection for mobile
   const toggleMobileSelectLead = (leadId: string) => {
-    setSelectedLeads(prev => 
-      prev.includes(leadId) 
-        ? prev.filter(id => id !== leadId) 
+    setSelectedLeads(prev =>
+      prev.includes(leadId)
+        ? prev.filter(id => id !== leadId)
         : [...prev, leadId]
     );
+  };
+
+  // Add/Update Lead
+  const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
+    if (!adminId) return false;
+
+    try {
+      const encryptedLead = await encryptObject({
+        ...newLead,
+        updatedAt: new Date().toISOString()
+      });
+
+      const newLeadRef = push(ref(database, `users/${adminId}/leads`));
+      await set(newLeadRef, encryptedLead);
+      toast.success('Lead added successfully');
+      return true;
+    } catch (error) {
+      toast.error('Failed to add lead');
+      console.error('Error adding lead:', error);
+      return false;
+    }
+  };
+
+  const handleUpdateLead = async (updatedLead: Lead) => {
+    if (!adminId || !agentId) return;
+  
+    try {
+      // Get the previous lead data to compare changes
+      const previousLead = leads.find(lead => lead.id === updatedLead.id);
+      
+      if (previousLead) {
+        // Find what changed
+        const changes: Record<string, any> = {};
+        Object.keys(updatedLead).forEach(key => {
+          if (updatedLead[key as keyof Lead] !== previousLead[key as keyof Lead]) {
+            changes[key] = {
+              from: previousLead[key as keyof Lead],
+              to: updatedLead[key as keyof Lead]
+            };
+          }
+        });
+  
+        if (Object.keys(changes).length > 0) {
+          await logEditActivity(adminId, agentId, previousLead, changes);
+        }
+      }
+  
+      const encryptedLead = await encryptObject({
+        ...updatedLead,
+        updatedAt: new Date().toISOString()
+      });
+      await update(ref(database, `users/${adminId}/leads/${updatedLead.id}`), encryptedLead);
+      toast.success('Lead updated successfully');
+    } catch (error) {
+      toast.error('Failed to update lead');
+      console.error('Error updating lead:', error);
+      throw error;
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -365,12 +499,11 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
     try {
       await remove(ref(database, `users/${adminId}/leads/${id}`));
       toast.success('Lead deleted successfully');
-      
+
       if (selectedLead?.id === id) {
         setSelectedLead(null);
       }
-      
-      // Reset to first page if the current page would be empty after deletion
+
       if (currentLeads.length === 1 && currentPage > 1) {
         setCurrentPage(currentPage - 1);
       }
@@ -380,67 +513,74 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
     }
   };
 
-  const handleUpdateLead = async (updatedLead: Lead) => {
-    if (!adminId) return;
-
+  const handleAction = async (type: string, lead: Lead) => {
+    if (!adminId || !agentId) return;
+  
     try {
-      await update(ref(database, `users/${adminId}/leads/${updatedLead.id}`), updatedLead);
-      setEditingLead(null);
-      toast.success('Lead updated successfully');
+      switch (type) {
+        case 'call':
+          if (lead.phone) {
+            await logLeadAction(adminId, agentId, lead.id, 'call', {
+              phoneNumber: lead.phone,
+              leadName: `${lead.firstName} ${lead.lastName}`
+            });
+            window.open(`tel:${lead.phone}`, '_blank');
+          } else {
+            toast.warning('No phone number available for this lead');
+          }
+          break;
+  
+        case 'email':
+          if (lead.email) {
+            await logLeadAction(adminId, agentId, lead.id, 'email', {
+              email: lead.email,
+              leadName: `${lead.firstName} ${lead.lastName}`
+            });
+            window.open(`mailto:${lead.email}?subject=Regarding your property inquiry`, '_blank');
+          } else {
+            toast.warning('No email address available for this lead');
+          }
+          break;
+  
+        case 'whatsapp':
+          if (lead.phone) {
+            await logLeadAction(adminId, agentId, lead.id, 'whatsapp', {
+              phoneNumber: lead.phone,
+              leadName: `${lead.firstName} ${lead.lastName}`
+            });
+            const cleanedPhone = lead.phone.replace(/\D/g, '');
+            const message = `Hi ${lead.firstName}, I'm following up on your property inquiry.`;
+            window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(message)}`, '_blank');
+          } else {
+            toast.warning('No phone number available for WhatsApp');
+          }
+          break;
+  
+        case 'edit':
+          setEditingLead(lead);
+          await logViewActivity(adminId, agentId, lead);
+          break;
+  
+        case 'view':
+          setSelectedLead(lead);
+          await logViewActivity(adminId, agentId, lead);
+          break;
+  
+        case 'schedule':
+          handleSingleScheduleCall(lead);
+          break;
+  
+        default:
+          break;
+      }
     } catch (error) {
-      toast.error('Failed to update lead');
-      console.error('Error updating lead:', error);
+      console.error('Error logging activity:', error);
     }
   };
-
-  const handleAction = (type: string, lead: Lead) => {
-    switch (type) {
-      case 'call':
-        if (lead.phone) {
-          window.open(`tel:${lead.phone}`, '_blank');
-        } else {
-          toast.warning('No phone number available for this lead');
-        }
-        break;
-        
-      case 'email':
-        if (lead.email) {
-          window.open(`mailto:${lead.email}?subject=Regarding your property inquiry`, '_blank');
-        } else {
-          toast.warning('No email address available for this lead');
-        }
-        break;
-        
-      case 'whatsapp':
-        if (lead.phone) {
-          const cleanedPhone = lead.phone.replace(/\D/g, '');
-          const message = `Hi ${lead.firstName}, I'm following up on your property inquiry.`;
-          window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(message)}`, '_blank');
-        } else {
-          toast.warning('No phone number available for WhatsApp');
-        }
-        break;
-        
-      case 'edit':
-        setEditingLead(lead);
-        break;
-        
-      case 'view':
-        setSelectedLead(lead);
-        break;
-        
-      case 'schedule':
-        handleSingleScheduleCall(lead);
-        break;
-        
-      default:
-        break;
-    }
-  };
-
-  const handleExport = () => {
+  // Export to Excel
+  const handleExport = async () => {
     try {
-      // Prepare the data for export
+      // No need to decrypt here since leads are already decrypted
       const exportData = filteredLeads.map(lead => ({
         'First Name': lead.firstName,
         'Last Name': lead.lastName,
@@ -458,115 +598,54 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
         'Status': lead.status,
         'Notes': lead.notes,
         'Preferred Contact Method': lead.preferredContactMethod,
-        'Created At': new Date(lead.createdAt).toLocaleString(),
-        'Scheduled Call': lead.scheduledCall 
-          ? new Date(lead.scheduledCall).toLocaleString() 
+        'Scheduled Call': lead.scheduledCall
+          ? new Date(lead.scheduledCall).toLocaleString()
           : ''
       }));
-  
-      // Create worksheet
+
       const worksheet = XLSX.utils.json_to_sheet(exportData);
-      
-      // Create workbook
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads');
-      
-      // Generate file name with current date
       const fileName = `leads_export_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.xlsx`;
-      
-      // Export the file
       XLSX.writeFile(workbook, fileName);
-      
-      toast.success(`Exported ${filteredLeads.length} leads to ${fileName}`);
+
+      toast.success(`Exported ${filteredLeads.length} leads`);
     } catch (error) {
-      console.error('Export error:', error);
       toast.error('Failed to export leads');
+      console.error('Export error:', error);
     }
   };
 
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-  
+
     if (!file.name.match(/\.(xlsx|xls|csv)$/)) {
       alert('Please upload an Excel file');
       return;
     }
-  
+
     try {
       const data = await readExcelFile(file);
       const validationResult = validateExcelData(data);
-  
+
       if (validationResult.isValid) {
-        // Fetch the current leads from Firebase
-        const currentLeads = await fetchLeadsCount();
-        const leadLimit = await fetchLeadLimit();
-  
-        const remainingLimit = leadLimit - currentLeads;
-        if (remainingLimit <= 0) {
-          setShowModal(true)
-          
-          return;
-        }
-  
-        // Determine how many leads can be imported
-        const leadsToImport = validationResult.validData.slice(0, remainingLimit);
-  
-        // Import only the allowed number of leads
-        await importLeadsToDatabase(leadsToImport);
-        alert(`Imported ${leadsToImport.length} leads successfully!`);
-  
-        // Optional: Notify if some leads were skipped due to limit
-        if (leadsToImport.length < validationResult.validData.length) {
-          alert(`Only ${leadsToImport.length} leads could be imported due to lead limit.`);
-        }
-  
-        setCurrentPage(1); // Reset to the first page after import
+        const importedCount = await importLeadsToDatabase(validationResult.validData);
+        toast.success(`Successfully imported ${importedCount} leads`);
+        setCurrentPage(1);
       } else {
-        alert(`Please use the required fields in the Excel. Missing fields: ${validationResult.missingFields.join(', ')}`);
+        toast.error(`Missing required fields: ${validationResult.missingFields.join(', ')}`);
       }
     } catch (error) {
+      toast.error('Failed to import leads');
       console.error('Error importing file:', error);
-      alert('Error importing file. Please check the format and try again.');
     }
   };
-  
-  // Function to fetch the current lead count from the database
-  const fetchLeadsCount = async () => {
-    // Assuming `adminId` is available in your context
-    const adminId = localStorage.getItem('adminkey');
-    const leadsRef = ref(database, `users/${adminId}/leads`);
-  
-    return new Promise((resolve, reject) => {
-      onValue(leadsRef, (snapshot) => {
-        const leadsData = snapshot.val();
-        const leadCount = leadsData ? Object.keys(leadsData).length : 0;
-        resolve(leadCount);
-      }, {
-        onlyOnce: true
-      });
-    });
-  };
-  
-  // Function to fetch the lead limit from the database
-  const fetchLeadLimit = async () => {
-    const adminId = localStorage.getItem('adminkey');
-    const limitRef = ref(database, `users/${adminId}/leadLimit`);
-  
-    return new Promise((resolve, reject) => {
-      onValue(limitRef, (snapshot) => {
-        const limit = snapshot.val() || 0;
-        resolve(limit);
-      }, {
-        onlyOnce: true
-      });
-    });
-  };
-  
+
   const readExcelFile = (file: File): Promise<any[]> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      
+
       reader.onload = (e) => {
         const data = e.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
@@ -574,15 +653,15 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
         const jsonData = XLSX.utils.sheet_to_json(firstSheet);
         resolve(jsonData);
       };
-      
+
       reader.onerror = (error) => reject(error);
       reader.readAsBinaryString(file);
     });
   };
-  
+
   const handleFileManagerClose = (files?: string[]) => {
     setShowFileManager(false);
-    
+
     if (files && files.length > 0) {
       if (fileManagerMode === 'import') {
         toast.success(`Imported leads from ${files[0]}`);
@@ -595,33 +674,43 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
   const resetFilters = () => {
     setSelectedStatus(null);
     setSelectedSource(null);
-    setCurrentPage(1); // Reset to first page when filters are reset
+    setCurrentPage(1);
+    toast.success('Filters reset');
   };
 
   const applyFilters = () => {
-    setCurrentPage(1); // Reset to first page when filters are applied
-    toast.success('Filters applied successfully');
+    setCurrentPage(1);
+    toast.success('Filters applied');
   };
 
+  // Import Excel Data
   const importLeadsToDatabase = async (leads: Omit<Lead, 'id'>[]) => {
-    const currentUser = localStorage.getItem('adminkey');
-    if (!currentUser) throw new Error('User not authenticated');
-    
-    const leadsRef = ref(database, `users/${currentUser}/leads`);
-    
-    const importPromises = leads.map(lead => {
-      const newLeadRef = push(leadsRef);
-      const firebaseId = newLeadRef.key;
-      return set(newLeadRef, {
-        ...lead,
-        id: firebaseId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        leadNumber: lead.leadNumber || 0
+    if (!adminId) throw new Error('Not authenticated');
+
+    const leadsRef = ref(database, `users/${adminId}/leads`);
+    const batchSize = 10; // Process in batches to avoid memory issues
+    let importedCount = 0;
+
+    for (let i = 0; i < leads.length; i += batchSize) {
+      const batch = leads.slice(i, i + batchSize);
+      const encryptedBatch = await Promise.all(
+        batch.map(async lead => ({
+          ...await encryptObject(lead),
+          createdAt: await encryptValue(new Date().toISOString()),
+          updatedAt: await encryptValue(new Date().toISOString())
+        }))
+      );
+
+      const batchPromises = encryptedBatch.map(encryptedLead => {
+        const newLeadRef = push(leadsRef);
+        return set(newLeadRef, encryptedLead);
       });
-    });
-    
-    await Promise.all(importPromises);
+
+      await Promise.all(batchPromises);
+      importedCount += batch.length;
+    }
+
+    return importedCount;
   };
 
   const validateExcelData = (data: any[]): {
@@ -681,7 +770,6 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
       notes: row.notes,
       preferredContactMethod: row.preferredContactMethod,
       leadNumber: row.leadNumber || 0,
-      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }));
 
@@ -704,7 +792,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
             <span className="text-sm font-medium">
               {selectedLeads.length} selected
             </span>
-            
+
             <Select onValueChange={handleBulkStatusChange}>
               <SelectTrigger className="w-[180px] neuro-inset">
                 <SelectValue placeholder="Change status..." />
@@ -717,31 +805,41 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 ))}
               </SelectContent>
             </Select>
-            
-            <Button 
-              variant="outline" 
-              size="sm" 
+
+            <Button
+              variant="outline"
+              size="sm"
               onClick={handleBulkScheduleCall}
               className="flex items-center gap-2"
             >
               <Clock className="h-4 w-4" />
               Schedule Call
             </Button>
-            
-            <Button 
-              variant="destructive" 
-              size="sm" 
-              onClick={handleBulkDelete}
-              className="flex items-center gap-2"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    variant="destructive"
+                    disabled={!isAdmin || selectedLeads.length === 0}
+                    onClick={handleBulkDelete}
+                  >
+                    Delete Selected
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!isAdmin && (
+                <TooltipContent>
+                  Only admins can perform bulk deletion
+                </TooltipContent>
+              )}
+            </Tooltip>
+
           </div>
-          
-          <Button 
-            variant="ghost" 
-            size="sm" 
+
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setSelectedLeads([]);
               setIsSelectAll(false);
@@ -765,7 +863,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
       {/* Status Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
         {allStatuses.map((status) => (
-          <div 
+          <div
             key={status}
             className={`neuro p-4 cursor-pointer ${selectedStatus === status ? 'ring-2 ring-pulse' : ''}`}
             onClick={() => {
@@ -784,15 +882,13 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
       {/* Actions and Search */}
       <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-        <Button
-  onClick={() => setIsAddingLead(true)}
-  className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
-  disabled={userRole === "agent"}
-  title={userRole === "agent" ? "You cannot create leads" : ""}
->
-  Add Lead
-</Button>
-  
+          <Button
+            onClick={() => setIsAddingLead(true)}
+            className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
+          >
+            Add Lead
+          </Button>
+
           <div className="flex flex-wrap gap-2 mt-2 sm:mt-0">
             <Popover>
               <PopoverTrigger asChild>
@@ -809,8 +905,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                     <div className="grid grid-cols-2 gap-2">
                       {allStatuses.map((status) => (
                         <div key={status} className="flex items-center space-x-2">
-                          <Checkbox 
-                            id={`status-${status}`} 
+                          <Checkbox
+                            id={`status-${status}`}
                             checked={selectedStatus === status}
                             onCheckedChange={() => {
                               setSelectedStatus(selectedStatus === status ? null : status);
@@ -824,28 +920,28 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                       ))}
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Source</p>
-                    <Select 
-  value={selectedSource || 'all'} 
-  onValueChange={(value) => {
-    setSelectedSource(value === 'all' ? null : value);
-    setCurrentPage(1);
-  }}
->
-  <SelectTrigger className="w-full neuro-inset focus:shadow-none">
-    <SelectValue placeholder="All sources" />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value="all">All sources</SelectItem>
-    {allSources.map(source => (
-      <SelectItem key={source} value={source}>{source}</SelectItem>
-    ))}
-  </SelectContent>
-</Select>
+                    <Select
+                      value={selectedSource || 'all'}
+                      onValueChange={(value) => {
+                        setSelectedSource(value === 'all' ? null : value);
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="w-full neuro-inset focus:shadow-none">
+                        <SelectValue placeholder="All sources" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All sources</SelectItem>
+                        {allSources.map(source => (
+                          <SelectItem key={source} value={source}>{source}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  
+
                   <div className="flex justify-between">
                     <Button variant="outline" size="sm" onClick={resetFilters}>Reset</Button>
                     <Button size="sm" onClick={applyFilters}>Apply Filters</Button>
@@ -853,22 +949,22 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 </div>
               </PopoverContent>
             </Popover>
-            
+
             <div className="flex gap-1">
-              <Button 
-                variant="outline" 
-                size="icon" 
+              <Button
+                variant="outline"
+                size="icon"
                 className="neuro hover:shadow-none transition-all duration-300"
                 onClick={handleExport}
                 title="Export leads"
               >
                 <Download className="h-4 w-4" />
               </Button>
-              <input 
-                type="file" 
-                accept=".xlsx,.xls,.csv" 
-                onChange={handleImport} 
-                style={{ display: 'none' }} 
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleImport}
+                style={{ display: 'none' }}
                 id="file-upload"
               />
               <Button
@@ -882,7 +978,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
             </div>
           </div>
         </div>
-        
+
         <div className="w-full sm:w-auto">
           <Input
             placeholder="Search leads..."
@@ -902,7 +998,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
           <thead>
             <tr className="bg-muted/50">
               <th className="text-left p-3 text-sm font-medium text-muted-foreground w-10">
-                <Checkbox 
+                <Checkbox
                   checked={isSelectAll}
                   onCheckedChange={toggleSelectAll}
                 />
@@ -911,19 +1007,18 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Phone</th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Status</th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Source</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Created</th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {currentLeads.map((lead) => (
-              <tr 
-                key={lead.id} 
+              <tr
+                key={lead.id}
                 className="hover:bg-muted/20 cursor-pointer"
                 onClick={() => handleAction('view', lead)}
               >
                 <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                  <Checkbox 
+                  <Checkbox
                     checked={selectedLeads.includes(lead.id)}
                     onCheckedChange={() => toggleSelectLead(lead.id)}
                   />
@@ -933,35 +1028,34 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                     <div>
                       <p className="font-medium">{lead.firstName} {lead.lastName}</p>
                       <p className="text-sm text-muted-foreground">{lead.email}</p>
-                      {lead.scheduledCall && (
+                      {lead.scheduledCall && !isNaN(new Date(lead.scheduledCall).getTime()) && (
                         <div className="flex items-center mt-1 text-xs text-blue-600">
                           <Clock className="h-3 w-3 mr-1" />
-                          {"Call Scheduled "+format(new Date(lead.scheduledCall), 'MMM dd, h:mm a')}
+                          {format(new Date(lead.scheduledCall), 'MMM dd, h:mm a')}
                         </div>
                       )}
+
                     </div>
                     <ChevronRight className="ml-2 h-4 w-4 text-muted-foreground" />
                   </div>
                 </td>
                 <td className="p-3">{lead.phone}</td>
                 <td className="p-3">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
                     lead.status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
-                    lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
-                    lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
-                    lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
+                      lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
+                        lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
+                          lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
+                            'bg-gray-100 text-gray-800'
+                    }`}>
                     {lead.status}
                   </span>
                 </td>
                 <td className="p-3 capitalize">{lead.source}</td>
-                <td className="p-3">{new Date(lead.createdAt).toLocaleDateString()}</td>
                 <td className="p-3">
                   <div className="flex space-x-1">
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={(e) => {
@@ -971,8 +1065,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                     >
                       <Phone className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={(e) => {
@@ -982,8 +1076,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                     >
                       <Mail className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={(e) => {
@@ -993,8 +1087,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                     >
                       <MessageSquare className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={(e) => {
@@ -1004,8 +1098,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                     >
                       <CalendarIcon className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={(e) => {
@@ -1015,17 +1109,30 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                     >
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="h-8 w-8 text-red-500 hover:text-red-600"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(lead.id);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-8 w-8 text-red-500 hover:text-red-600 ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''
+                              }`}
+                            disabled={!isAdmin}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isAdmin) handleDelete(lead.id);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {!isAdmin && (
+                        <TooltipContent>
+                          Agents cannot delete leads
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
                   </div>
                 </td>
               </tr>
@@ -1034,10 +1141,11 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
         </table>
       </div>
 
+      {/* Mobile View */}
       <div className="sm:hidden space-y-4" style={mobileSelectMode ? { marginBottom: '80px', marginTop: '64px' } : {}}>
         {currentLeads.map((lead) => (
-          <div 
-            key={lead.id} 
+          <div
+            key={lead.id}
             className={`neuro p-4 rounded-lg cursor-pointer relative ${selectedLeads.includes(lead.id) ? 'ring-2 ring-blue-500' : ''}`}
             onClick={() => {
               if (mobileSelectMode) {
@@ -1056,41 +1164,40 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 )}
               </div>
             )}
-            
+
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="font-medium">{lead.firstName} {lead.lastName}</h3>
                 <p className="text-sm text-muted-foreground">{lead.email}</p>
                 <p className="text-sm mt-1">{lead.company}</p>
-                {lead.scheduledCall && (
+                {lead.scheduledCall && !isNaN(new Date(lead.scheduledCall).getTime()) && (
                   <div className="flex items-center mt-1 text-xs text-blue-600">
                     <Clock className="h-3 w-3 mr-1" />
                     {format(new Date(lead.scheduledCall), 'MMM dd, h:mm a')}
                   </div>
                 )}
+
               </div>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
                 lead.status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
-                lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
-                lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
-                lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
-                'bg-gray-100 text-gray-800'
-              }`}>
+                  lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
+                    lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
+                      lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
+                        'bg-gray-100 text-gray-800'
+                }`}>
                 {lead.status}
               </span>
             </div>
-            
+
             <div className="flex flex-wrap items-center mt-2 gap-2 text-sm text-muted-foreground">
               <div className="mr-4">Source: {lead.source}</div>
-              <div>Added: {new Date(lead.createdAt).toLocaleDateString()}</div>
             </div>
-            
+
             {!mobileSelectMode && (
               <div className="mt-3 pt-3 border-t flex justify-between">
                 <div className="flex space-x-3">
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-foreground"
                     onClick={(e) => {
@@ -1100,8 +1207,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                   >
                     <Phone className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-foreground"
                     onClick={(e) => {
@@ -1111,8 +1218,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                   >
                     <Mail className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-foreground"
                     onClick={(e) => {
@@ -1122,8 +1229,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                   >
                     <MessageSquare className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-foreground"
                     onClick={(e) => {
@@ -1135,8 +1242,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                   </Button>
                 </div>
                 <div className="flex space-x-2">
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-foreground"
                     onClick={(e) => {
@@ -1146,8 +1253,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                   >
                     <Edit className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-red-500 hover:text-red-600"
                     onClick={(e) => {
@@ -1164,11 +1271,11 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
         ))}
       </div>
 
-         {/* Mobile Selection Mode Toggle Button */}
-         {isMobile && !mobileSelectMode && (
+      {/* Mobile Selection Mode Toggle Button */}
+      {isMobile && !mobileSelectMode && (
         <div className="fixed bottom-4 right-4 z-50">
-          <Button 
-            size="icon" 
+          <Button
+            size="icon"
             className="h-12 w-12 rounded-full shadow-lg"
             onClick={toggleMobileSelectMode}
           >
@@ -1177,7 +1284,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
         </div>
       )}
 
-{selectedLead && (
+      {selectedLead && (
         <>
           {isMobile ? (
             <Drawer open={!!selectedLead} onOpenChange={(open) => !open && setSelectedLead(null)}>
@@ -1186,9 +1293,9 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                   <DrawerHeader className="text-left pb-2">
                     <DrawerTitle className="flex justify-between items-center">
                       <span>Lead Details</span>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="absolute top-4 right-4"
                         onClick={() => setSelectedLead(null)}
                       >
@@ -1196,9 +1303,9 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                       </Button>
                     </DrawerTitle>
                   </DrawerHeader>
-                  
+
                   <div className="p-4 pt-0 overflow-y-auto">
-                    <LeadDetails 
+                    <LeadDetails
                       lead={selectedLead}
                       onClose={() => setSelectedLead(null)}
                       onEdit={() => {
@@ -1213,11 +1320,11 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                       isMobile={true}
                     />
                   </div>
-                  
+
                   <DrawerFooter className="pt-0">
                     <div className="flex justify-between gap-2">
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         className="flex-1"
                         onClick={() => {
                           setSelectedLead(null);
@@ -1227,16 +1334,16 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                         <Edit className="h-4 w-4 mr-2" />
                         Edit
                       </Button>
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         className="flex-1"
                         onClick={() => handleSingleScheduleCall(selectedLead)}
                       >
                         <CalendarIcon className="h-4 w-4 mr-2" />
                         Schedule
                       </Button>
-                      <Button 
-                        variant="destructive" 
+                      <Button
+                        variant="destructive"
                         className="flex-1"
                         onClick={() => {
                           handleDelete(selectedLead.id);
@@ -1257,7 +1364,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 <DialogHeader>
                   <DialogTitle>Lead Details</DialogTitle>
                 </DialogHeader>
-                <LeadDetails 
+                <LeadDetails
                   lead={selectedLead}
                   onClose={() => setSelectedLead(null)}
                   onEdit={() => {
@@ -1276,13 +1383,13 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
         </>
       )}
 
-    {/* Mobile Selection Mode Header */}
-    {isMobile && mobileSelectMode && (
+      {/* Mobile Selection Mode Header */}
+      {isMobile && mobileSelectMode && (
         <div className="fixed top-16 left-0 right-0 bg-background z-50 p-3 border-b flex justify-between items-center">
           <div className="flex items-center space-x-3">
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={toggleMobileSelectMode}
             >
               <X className="h-5 w-5" />
@@ -1291,7 +1398,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
               {selectedLeads.length} selected
             </span>
           </div>
-          <Button 
+          <Button
             variant="ghost"
             onClick={() => {
               setIsSelectAll(!isSelectAll);
@@ -1303,8 +1410,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
         </div>
       )}
 
-{/* Mobile Bulk Actions Bar - Fixed at bottom when in selection mode */}
-{isMobile && mobileSelectMode && (
+      {/* Mobile Bulk Actions Bar - Fixed at bottom when in selection mode */}
+      {isMobile && mobileSelectMode && (
         <div className="fixed bottom-0 left-0 right-0 bg-background z-50 p-3 border-t shadow-lg">
           <div className="flex justify-between gap-2">
             <Select onValueChange={handleBulkStatusChange}>
@@ -1319,19 +1426,19 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 ))}
               </SelectContent>
             </Select>
-            
-            <Button 
-              variant="outline" 
-              size="sm" 
+
+            <Button
+              variant="outline"
+              size="sm"
               onClick={handleBulkScheduleCall}
               className="h-10 px-3"
             >
               <Clock className="h-4 w-4" />
             </Button>
-            
-            <Button 
-              variant="destructive" 
-              size="sm" 
+
+            <Button
+              variant="destructive"
+              size="sm"
               onClick={handleBulkDelete}
               className="h-10 px-3"
             >
@@ -1344,8 +1451,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
 
       <div className="sm:hidden space-y-4">
         {currentLeads.map((lead) => (
-          <div 
-            key={lead.id} 
+          <div
+            key={lead.id}
             className="neuro p-4 rounded-lg cursor-pointer"
             onClick={() => handleAction('view', lead)}
           >
@@ -1354,34 +1461,33 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 <h3 className="font-medium">{lead.firstName} {lead.lastName}</h3>
                 <p className="text-sm text-muted-foreground">{lead.email}</p>
                 <p className="text-sm mt-1">{lead.company}</p>
-                {lead.scheduledCall && (
+                {lead.scheduledCall && !isNaN(new Date(lead.scheduledCall).getTime()) && (
                   <div className="flex items-center mt-1 text-xs text-blue-600">
                     <Clock className="h-3 w-3 mr-1" />
                     {format(new Date(lead.scheduledCall), 'MMM dd, h:mm a')}
                   </div>
                 )}
+
               </div>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
                 lead.status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
-                lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
-                lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
-                lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
-                'bg-gray-100 text-gray-800'
-              }`}>
+                  lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
+                    lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
+                      lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
+                        'bg-gray-100 text-gray-800'
+                }`}>
                 {lead.status}
               </span>
             </div>
-            
+
             <div className="flex flex-wrap items-center mt-2 gap-2 text-sm text-muted-foreground">
               <div className="mr-4">Source: {lead.source}</div>
-              <div>Added: {new Date(lead.createdAt).toLocaleDateString()}</div>
             </div>
-            
+
             <div className="mt-3 pt-3 border-t flex justify-between">
               <div className="flex space-x-3">
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   onClick={(e) => {
@@ -1391,8 +1497,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 >
                   <Phone className="h-4 w-4" />
                 </Button>
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   onClick={(e) => {
@@ -1402,8 +1508,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 >
                   <Mail className="h-4 w-4" />
                 </Button>
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   onClick={(e) => {
@@ -1413,8 +1519,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 >
                   <MessageSquare className="h-4 w-4" />
                 </Button>
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   onClick={(e) => {
@@ -1426,8 +1532,8 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 </Button>
               </div>
               <div className="flex space-x-2">
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   onClick={(e) => {
@@ -1437,17 +1543,29 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 >
                   <Edit className="h-4 w-4" />
                 </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon"
-                  className="h-8 w-8 text-red-500 hover:text-red-600"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(lead.id);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-block">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={`h-8 w-8 text-red-500 hover:text-red-600 ${!isAdmin ? 'pointer-events-none opacity-50' : ''
+                          }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isAdmin) handleDelete(lead.id); // Safety check
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!isAdmin && (
+                    <TooltipContent>
+                      Agents cannot delete leads
+                    </TooltipContent>
+                  )}
+                </Tooltip>
               </div>
             </div>
           </div>
@@ -1479,7 +1597,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            
+
             {/* Page numbers - show up to 5 pages around current page */}
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               let pageNum;
@@ -1492,11 +1610,11 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
               } else {
                 pageNum = currentPage - 2 + i;
               }
-              
+
               return (
                 <Button
-      key={`page-${pageNum}`}  // Add key here
-      variant={currentPage === pageNum ? "default" : "outline"}
+                  key={`page-${pageNum}`}  // Add key here
+                  variant={currentPage === pageNum ? "default" : "outline"}
                   size="icon"
                   className="h-8 w-8"
                   onClick={() => paginate(pageNum)}
@@ -1505,7 +1623,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 </Button>
               );
             })}
-            
+
             <Button
               variant="outline"
               size="icon"
@@ -1536,7 +1654,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
               {isBulkScheduling ? 'Schedule Calls for Selected Leads' : 'Schedule Call'}
             </DialogTitle>
           </DialogHeader>
-          
+
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-1 gap-4">
               <Label htmlFor="call-date">Date</Label>
@@ -1547,7 +1665,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
                 className="rounded-md border"
               />
             </div>
-            
+
             <div className="grid grid-cols-1 gap-4">
               <Label htmlFor="call-time">Time</Label>
               <Input
@@ -1558,7 +1676,7 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
               />
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowScheduleCall(false)}>
               Cancel
@@ -1571,26 +1689,26 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
       </Dialog>
 
       {/* Lead Form Dialogs */}
-      <LeadForm 
-        isOpen={isAddingLead} 
-        onClose={() => setIsAddingLead(false)} 
+      <LeadForm
+        isOpen={isAddingLead}
+        onClose={() => setIsAddingLead(false)}
         onSubmit={(newLead) => {
           setIsAddingLead(false);
           toast.success('Lead added successfully');
           setCurrentPage(1);
-        }} 
+        }}
       />
-      
-      <LeadForm 
-        isOpen={!!editingLead} 
-        onClose={() => setEditingLead(null)} 
+
+      <LeadForm
+        isOpen={!!editingLead}
+        onClose={() => setEditingLead(null)}
         onSubmit={handleUpdateLead}
         lead={editingLead}
       />
 
       {/* Lead Details Dialog */}
       {selectedLead && (
-        <LeadDetails 
+        <LeadDetails
           lead={selectedLead}
           onClose={() => setSelectedLead(null)}
           onEdit={() => {
@@ -1606,15 +1724,12 @@ const [showAddLeadButton, setShowAddLeadButton] = useState(true);
       )}
 
       {/* File Manager Dialog */}
-      <FileManager 
-        isOpen={showFileManager} 
+      <FileManager
+        isOpen={showFileManager}
         onClose={handleFileManagerClose}
         mode={fileManagerMode}
         fileType="excel"
       />
-             <PlanModal isOpen={showModal} onClose={() => setShowModal(false)} />
-
-      
     </div>
   );
 };

@@ -11,6 +11,8 @@ import { ref, push, set, get, update } from 'firebase/database';
 import { getToken, onMessage } from 'firebase/messaging';
 import { toast } from 'sonner';
 import { format, parseISO, subMinutes } from 'date-fns';
+import { encryptObject, decryptObject } from '../../lib/utils';
+
 
 interface Meeting {
   id: string;
@@ -240,6 +242,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
     });
   };
 
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -251,6 +254,8 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
     setIsLoading(true);
     try {
       const meetingId = meeting?.id || `meeting-${Date.now()}`;
+      
+      // Prepare meeting data
       const newMeeting: Meeting = {
         id: meetingId,
         title: formData.title || '',
@@ -266,23 +271,32 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         ...(meeting?.originalMeetingId && { originalMeetingId: meeting.originalMeetingId }),
         ...(!isAdmin && { agentId: agentId }),
       };
-
+  
+      // Encrypt the meeting data
+      const encryptedMeeting = await encryptObject(newMeeting);
+      console.log('Original meeting:', newMeeting);
+      console.log('Encrypted meeting:', encryptedMeeting);
+  
       const updates: Record<string, any> = {};
-
+  
       if (isAdmin) {
-        updates[`users/${adminId}/meetingdetails/${meetingId}`] = newMeeting;
-
+        // Store encrypted meeting for admin
+        updates[`users/${adminId}/meetingdetails/${meetingId}`] = encryptedMeeting;
+  
         if (selectedAgents.length > 0) {
+          // Store encrypted meetings for each agent
           selectedAgents.forEach(agentId => {
-            updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meetingId}`] = {
-              ...newMeeting,
+            const agentMeeting = {
+              ...encryptedMeeting,
               isAgentMeeting: true,
               originalMeetingId: meetingId,
               agentId: agentId
             };
+            updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meetingId}`] = agentMeeting;
           });
         }
-
+  
+        // Remove meetings for deselected agents
         if (meeting?.participants) {
           const removedAgents = meeting.participants.filter(id => !selectedAgents.includes(id));
           removedAgents.forEach(agentId => {
@@ -290,28 +304,34 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
           });
         }
       } else {
-        updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meetingId}`] = newMeeting;
-
+        // Agent creating a meeting
+        updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meetingId}`] = encryptedMeeting;
+  
+        // Create reference in admin's meetingdetails
         const adminMeetingRef = push(ref(database, `users/${adminId}/meetingdetails`));
         updates[`users/${adminId}/meetingdetails/${adminMeetingRef.key}`] = {
-          ...newMeeting,
+          ...encryptedMeeting,
           isAgentMeeting: true,
           agentId: agentId
         };
-
+  
+        // Share with other participants if any
         selectedAgents.filter(id => id !== agentId).forEach(participantId => {
           updates[`users/${adminId}/agents/${participantId}/meetingdetails/${meetingId}`] = {
-            ...newMeeting,
+            ...encryptedMeeting,
             isAgentMeeting: true,
             originalMeetingId: meetingId,
             agentId: agentId
           };
         });
       }
-
+  
+      // Save all updates
       await update(ref(database), updates);
+      
+      // Schedule notification with original (unencrypted) data
       await scheduleNotification(newMeeting);
-
+  
       toast.success(meeting ? 'Meeting updated successfully' : 'Meeting scheduled successfully');
       onSubmit();
       onClose();
@@ -322,7 +342,6 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
       setIsLoading(false);
     }
   };
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[500px] neuro border-none max-h-[90vh] overflow-y-auto">

@@ -254,6 +254,20 @@ export const AgentForm: React.FC<AgentFormProps> = ({ isOpen, onClose, onSubmit,
       setIsSubmitting(false);
     }
 };
+
+const isDateValidFor18Plus = (date: Date): boolean => {
+  const today = new Date();
+  const minDate = new Date();
+  minDate.setFullYear(today.getFullYear() - 18);
+  return date <= minDate;
+};
+const generateYears = (from: number, to: number) => {
+  const years = [];
+  for (let i = to; i >= from; i--) { // Reverse order (newest first)
+    years.push(i);
+  }
+  return years;
+};
   
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -307,112 +321,155 @@ export const AgentForm: React.FC<AgentFormProps> = ({ isOpen, onClose, onSubmit,
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="birthDate">Birth Date</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "w-full justify-start text-left font-normal",
-                    !birthDate && "text-muted-foreground"
-                  )}
+  <Label htmlFor="birthDate">Birth Date </Label>
+  <Popover>
+    <PopoverTrigger asChild>
+      <Button
+        variant="outline"
+        className={cn(
+          "w-full justify-start text-left font-normal",
+          !birthDate && "text-muted-foreground"
+        )}
+      >
+        <CalendarIcon className="mr-2 h-4 w-4" />
+        {birthDate ? format(birthDate, 'PPP') : <span>Pick a date</span>}
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent className="w-auto p-2" align="start">
+      <div className="flex flex-col gap-3">
+        {/* Year selection */}
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              const currentDate = birthDate || new Date();
+              const newYear = getYear(currentDate) - 1;
+              const newDate = setYear(currentDate, newYear);
+              if (isDateValidFor18Plus(newDate)) {
+                handleBirthDateChange(newDate);
+              }
+            }}
+            disabled={getYear(birthDate || new Date()) <= new Date().getFullYear() - 120} // 120 years max age
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Select
+            value={birthDate ? getYear(birthDate).toString() : (new Date().getFullYear() - 18).toString()}
+            onValueChange={(value) => {
+              const newYear = parseInt(value);
+              const currentDate = birthDate || new Date();
+              const newDate = setYear(currentDate, newYear);
+              if (isDateValidFor18Plus(newDate)) {
+                handleBirthDateChange(newDate);
+              }
+            }}
+          >
+            <SelectTrigger className="w-[120px]">
+              <SelectValue placeholder="Year" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[200px] overflow-y-auto">
+              {generateYears(new Date().getFullYear() - 120, new Date().getFullYear() - 18).map((year) => (
+                <SelectItem key={year} value={year.toString()}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              const currentDate = birthDate || new Date();
+              const newYear = getYear(currentDate) + 1;
+              const newDate = setYear(currentDate, newYear);
+              if (isDateValidFor18Plus(newDate)) {
+                handleBirthDateChange(newDate);
+              }
+            }}
+            disabled={getYear(birthDate || new Date()) >= new Date().getFullYear() - 18}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Month selection */}
+        <Select
+          value={birthDate ? getMonth(birthDate).toString() : getMonth(new Date()).toString()}
+          onValueChange={(value) => {
+            const newMonth = parseInt(value);
+            const currentDate = birthDate || new Date();
+            const newDate = setMonth(currentDate, newMonth);
+            if (isDateValidFor18Plus(newDate)) {
+              handleBirthDateChange(newDate);
+            }
+          }}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Month" />
+          </SelectTrigger>
+          <SelectContent>
+            {months.map((month, index) => {
+              const currentDate = birthDate || new Date();
+              const isFutureMonth = 
+                getYear(currentDate) === new Date().getFullYear() - 18 && 
+                index > getMonth(new Date());
+              return (
+                <SelectItem 
+                  key={month} 
+                  value={index.toString()}
+                  disabled={isFutureMonth}
                 >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {birthDate ? format(birthDate, 'PPP') : <span>Pick a date</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-2" align="start">
-                <div className="flex flex-col gap-3">
-                  {/* Year selection */}
-                  <div className="flex items-center justify-between gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        const newYear = getYear(birthDate || new Date()) - 1;
-                        handleBirthDateChange(setYear(birthDate || new Date(), newYear));
-                      }}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Select
-                      value={birthDate ? getYear(birthDate).toString() : getYear(new Date()).toString()}
-                      onValueChange={(value) => {
-                        const newYear = parseInt(value);
-                        handleBirthDateChange(setYear(birthDate || new Date(), newYear));
-                      }}
-                    >
-                      <SelectTrigger className="w-[120px]">
-                        <SelectValue placeholder="Year" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[200px] overflow-y-auto">
-                        {generateYears(1960, new Date().getFullYear() - 18).map((year) => (
-                          <SelectItem key={year} value={year.toString()}>
-                            {year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        const newYear = getYear(birthDate || new Date()) + 1;
-                        if (newYear <= new Date().getFullYear() - 18) {
-                          handleBirthDateChange(setYear(birthDate || new Date(), newYear));
-                        }
-                      }}
-                      disabled={getYear(birthDate || new Date()) >= new Date().getFullYear() - 18}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {month}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
 
-                  {/* Month selection */}
-                  <Select
-                    value={birthDate ? getMonth(birthDate).toString() : getMonth(new Date()).toString()}
-                    onValueChange={(value) => {
-                      const newMonth = parseInt(value);
-                      handleBirthDateChange(setMonth(birthDate || new Date(), newMonth));
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Month" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {months.map((month, index) => (
-                        <SelectItem key={month} value={index.toString()}>
-                          {month}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  {/* Day selection */}
-                  <div className="grid grid-cols-7 gap-1">
-                    {Array.from({ length: getDaysInMonth(
-                      getYear(birthDate || new Date()),
-                      getMonth(birthDate || new Date())
-                    ) }, (_, i) => i + 1).map((day) => (
-                      <Button
-                        key={day}
-                        variant={
-                          birthDate && getDate(birthDate) === day ? 'default' : 'ghost'
-                        }
-                        size="sm"
-                        onClick={() => {
-                          handleBirthDateChange(setDate(birthDate || new Date(), day));
-                        }}
-                        className="h-8 w-8 p-0"
-                      >
-                        {day}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
+        {/* Day selection */}
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ 
+            length: getDaysInMonth(
+              getYear(birthDate || new Date()),
+              getMonth(birthDate || new Date())
+            ) 
+          }, (_, i) => {
+            const day = i + 1;
+            const currentDate = birthDate || new Date();
+            const selectedDate = new Date(
+              getYear(currentDate),
+              getMonth(currentDate),
+              day
+            );
+            const isFutureDate = !isDateValidFor18Plus(selectedDate);
+            const isCurrentDay = birthDate && getDate(birthDate) === day;
+            
+            return (
+              <Button
+                key={day}
+                variant={isCurrentDay ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => {
+                  if (!isFutureDate) {
+                    handleBirthDateChange(setDate(currentDate, day));
+                  }
+                }}
+                className={cn(
+                  "h-8 w-8 p-0",
+                  isFutureDate && "opacity-50 cursor-not-allowed"
+                )}
+                disabled={isFutureDate}
+              >
+                {day}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
+    </PopoverContent>
+  </Popover>
+</div>
           
           {!agent && (
             <>

@@ -60,6 +60,16 @@ export const MobileNavBar: React.FC = () => {
         <Calendar size={20} />
         <span className="text-xs mt-1">Meetings</span>
       </NavLink>
+
+      <NavLink 
+        to="/deals" 
+        className={({ isActive }) => `flex flex-col items-center justify-center w-1/5 h-full ${
+          isActive ? 'text-pulse' : 'text-muted-foreground'
+        }`}
+      >
+        <Calendar size={20} />
+        <span className="text-xs mt-1">Deals</span>
+      </NavLink>
       
       <NavLink 
         to="/settings" 

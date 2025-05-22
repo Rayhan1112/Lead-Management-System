@@ -9,6 +9,8 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { database } from '../../firebase';
 import { ref, onValue, off, remove, get, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
+import { decryptObject } from '../../lib/utils'; // Import your decryption utility
+
 
 interface Meeting {
   id: string;
@@ -47,7 +49,7 @@ export const MeetingsTable: React.FC = () => {
   const agentId = localStorage.getItem('agentkey');
 
   useEffect(() => {
-    const fetchMeetings = () => {
+    const fetchMeetings = async () => {
       let meetingsRef;
       
       if (isAdmin && adminId) {
@@ -57,22 +59,45 @@ export const MeetingsTable: React.FC = () => {
       } else {
         return;
       }
-
-      onValue(meetingsRef, (snapshot) => {
+  
+      onValue(meetingsRef, async (snapshot) => {
+        const encryptedMeetingsData = snapshot.val();
         const meetingsData: Meeting[] = [];
-        snapshot.forEach((childSnapshot) => {
-          const meeting = {
-            id: childSnapshot.key!,
-            ...childSnapshot.val()
-          };
-          meetingsData.push(meeting);
-        });
+  
+        if (encryptedMeetingsData) {
+          // Process meetings in parallel
+          const meetingPromises = Object.keys(encryptedMeetingsData).map(async (meetingId) => {
+            try {
+              const encryptedMeeting = encryptedMeetingsData[meetingId];
+              // Decrypt the meeting data
+              const decryptedMeeting = await decryptObject(encryptedMeeting);
+              
+              return {
+                id: meetingId,
+                ...decryptedMeeting
+              };
+            } catch (error) {
+              console.error(`Error decrypting meeting ${meetingId}:`, error);
+              // Fallback to encrypted data with error flag
+              return {
+                id: meetingId,
+                ...encryptedMeetingsData[meetingId],
+                decryptionError: true
+              };
+            }
+          });
+  
+          // Wait for all meetings to be processed
+          const processedMeetings = await Promise.all(meetingPromises);
+          meetingsData.push(...processedMeetings.filter(m => m !== undefined));
+        }
+        
         setMeetings(meetingsData);
       });
-
+  
       return () => off(meetingsRef);
     };
-
+  
     const fetchAgents = () => {
       if (!adminId) return;
       
@@ -99,16 +124,16 @@ export const MeetingsTable: React.FC = () => {
           }
         }
       });
-
+  
       return () => off(agentsRef);
     };
-
+  
     fetchMeetings();
     fetchAgents();
   }, [isAdmin, adminId, agentId]);
 
   const filteredMeetings = meetings.filter(meeting => {
-    return meeting.title.toLowerCase().includes(searchTerm.toLowerCase());
+    return meeting?.title?.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
   const indexOfLastMeeting = currentPage * meetingsPerPage;

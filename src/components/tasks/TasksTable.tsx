@@ -7,7 +7,7 @@ import { Task } from '@/lib/mockData';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AddTaskForm } from './AddTaskForm';
 import { database } from '../../firebase';
-import { ref, onValue, off, remove, set } from 'firebase/database';
+import { ref, onValue, off, remove, set, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 
 interface Agent {
@@ -129,33 +129,52 @@ export const TasksTable: React.FC = () => {
     }
   };
 
-  const handleAddTask = async (newTask: Task) => {
-    try {
-      let taskRef;
-      if (isAdmin && adminId) {
-        taskRef = ref(database, `users/${adminId}/tasks/${newTask.id}`);
-      } else if (agentId && adminId) {
-        taskRef = ref(database, `users/${adminId}/agents/${agentId}/tasks/${newTask.id}`);
-      } else {
-        throw new Error('Unable to determine storage path');
-      }
-  
-      await set(taskRef, newTask);
-      
-      setTasks(prev => [newTask, ...prev]);
-      setIsAddingTask(false);
-      toast.success('Task added successfully');
-    } catch (error) {
-      console.error('Error adding task:', error);
-      toast.error('Failed to add task');
+
+
+const handleAddTask = async (newTask: Task) => {
+  try {
+    if (!adminId) throw new Error("Missing adminId");
+
+    const updates: { [key: string]: any } = {};
+
+    if (isAdmin) {
+      if (!newTask.agentId) throw new Error("Missing agentId for task");
+
+      // Set task in agent's task path
+      updates[`users/${adminId}/agents/${newTask.agentId}/tasks/${newTask.id}`] = newTask;
+
+      // Set task in admin's general task path
+      updates[`users/${adminId}/tasks/${newTask.id}`] = newTask;
+    } else if (agentId) {
+      // Set task in agent's path
+      updates[`users/${adminId}/agents/${agentId}/tasks/${newTask.id}`] = newTask;
+
+      // Set task in admin's general task path
+      updates[`users/${adminId}/tasks/${newTask.id}`] = newTask;
+    } else {
+      throw new Error("Unable to determine storage path");
     }
-  };
+
+    await update(ref(database), updates);
+
+    setTasks(prev => [newTask, ...prev]);
+    setIsAddingTask(false);
+    toast.success("Task added successfully");
+  } catch (error) {
+    console.error("Error adding task:", error);
+    toast.error("Failed to add task");
+  }
+};
+
+  
   
   const handleUpdateTask = async (updatedTask: Task) => {
     try {
       let taskRef;
+  
       if (isAdmin && adminId) {
-        taskRef = ref(database, `users/${adminId}/tasks/${updatedTask.id}`);
+        if (!updatedTask.agentId) throw new Error("Missing agentId for task");
+        taskRef = ref(database, `users/${adminId}/agents/${updatedTask.agentId}/tasks/${updatedTask.id}`);
       } else if (agentId && adminId) {
         taskRef = ref(database, `users/${adminId}/agents/${agentId}/tasks/${updatedTask.id}`);
       } else {
@@ -163,7 +182,7 @@ export const TasksTable: React.FC = () => {
       }
   
       await set(taskRef, updatedTask);
-      
+  
       setTasks(prev => prev.map(task => 
         task.id === updatedTask.id ? updatedTask : task
       ));
@@ -175,6 +194,7 @@ export const TasksTable: React.FC = () => {
       toast.error('Failed to update task');
     }
   };
+  
 
   const handleEdit = (task: Task) => {
     setSelectedTask(task);

@@ -3,7 +3,7 @@ import { format, startOfToday, eachDayOfInterval, endOfMonth, startOfMonth, isTo
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
+import { cn, decryptObject } from '@/lib/utils';
 import { getDatabase, ref, onValue } from 'firebase/database';
 import { database } from '../../firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -32,42 +32,66 @@ export const EnhancedCalendar: React.FC = () => {
   useEffect(() => {
     const fetchMeetings = () => {
       if (!adminId) return;
-
+  
       let meetingsRef;
-      
+  
       if (isAdmin) {
         meetingsRef = ref(database, `users/${adminId}/meetingdetails`);
       } else {
         if (!agentId) return;
         meetingsRef = ref(database, `users/${adminId}/agents/${agentId}/meetingdetails`);
       }
-
-      onValue(meetingsRef, (snapshot) => {
-        const meetingsData = snapshot.val();
-        const meetingsList: Meeting[] = [];
-
-        if (meetingsData) {
-          Object.keys(meetingsData).forEach((meetingId) => {
-            const meeting = meetingsData[meetingId];
-            if (meeting.startDate) {
-              meetingsList.push({ 
-                id: meetingId,
-                ...meeting
+  
+      const unsubscribe = onValue(
+        meetingsRef,
+        (snapshot) => {
+          const meetingsData = snapshot.val();
+  
+          const processMeetings = async () => {
+            const meetingsList: Meeting[] = [];
+  
+            if (meetingsData) {
+              const decryptedMeetings = await Promise.all(
+                Object.entries(meetingsData).map(async ([meetingId, encryptedMeeting]: any) => {
+                  try {
+                    const decrypted = await decryptObject(encryptedMeeting);
+                    return {
+                      id: meetingId,
+                      ...decrypted,
+                    };
+                  } catch (err) {
+                    console.error("Decryption failed for meeting:", meetingId, err);
+                    return null;
+                  }
+                })
+              );
+  
+              decryptedMeetings.forEach((meeting) => {
+                if (meeting && meeting.startDate) {
+                  meetingsList.push(meeting);
+                }
               });
             }
-          });
+  
+            setMeetings(meetingsList);
+            setLoading(false);
+          };
+  
+          processMeetings();
+        },
+        (error) => {
+          console.error("Error fetching meetings:", error);
+          setLoading(false);
         }
-
-        setMeetings(meetingsList);
-        setLoading(false);
-      }, (error) => {
-        console.error("Error fetching meetings:", error);
-        setLoading(false);
-      });
+      );
+  
+      // Cleanup the listener
+      return () => unsubscribe();
     };
-
+  
     fetchMeetings();
   }, [adminId, agentId, isAdmin]);
+  
 
   const firstDayOfMonth = startOfMonth(currentMonth);
   const lastDayOfMonth = endOfMonth(currentMonth);

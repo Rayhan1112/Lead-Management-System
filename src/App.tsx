@@ -25,6 +25,7 @@ import NotFound from "./pages/NotFound";
 import SignupForm from "./components/SignupForm";
 import { AssignLeads } from "./components/AssignLeads";
 import AssignedLeadsPage from "./pages/AssignedLeadsPage";
+import ForgotPassword from "./components/ForgetPassword";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +45,7 @@ const AppRoutes = () => {
       <Route path="/" element={<Index />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<SignupForm />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
       
       {/* Protected routes */}
       <Route path="/dashboard" element={

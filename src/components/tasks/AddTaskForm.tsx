@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Agent, Task } from '@/lib/mockData';
 
 interface AddTaskFormProps {
   isOpen: boolean;

@@ -6,6 +6,7 @@ import { format, isToday, isAfter, parseISO } from 'date-fns';
 import { getDatabase, ref, onValue } from 'firebase/database';
 import { database } from '../../firebase';
 import { useAuth } from '@/context/AuthContext';
+import { decryptObject } from '@/lib/utils';
 
 interface Meeting {
   id: string;
@@ -27,53 +28,74 @@ export const NotificationDropdown: React.FC = () => {
   useEffect(() => {
     const fetchMeetings = () => {
       if (!adminId) return;
-
+  
       let meetingsRef;
-      
+  
       if (isAdmin) {
         meetingsRef = ref(database, `users/${adminId}/meetingdetails`);
       } else {
         if (!agentId) return;
         meetingsRef = ref(database, `users/${adminId}/agents/${agentId}/meetingdetails`);
       }
-
-      onValue(meetingsRef, (snapshot) => {
-        const meetingsData = snapshot.val();
-        const meetingsList: Meeting[] = [];
-
-        if (meetingsData) {
-          Object.keys(meetingsData).forEach((meetingId) => {
-            const meeting = meetingsData[meetingId];
-            if (meeting.startDate) {
-              meetingsList.push({ 
-                id: meetingId,
-                ...meeting
+  
+      const unsubscribe = onValue(
+        meetingsRef,
+        (snapshot) => {
+          const meetingsData = snapshot.val();
+  
+          const processMeetings = async () => {
+            const meetingsList: Meeting[] = [];
+  
+            if (meetingsData) {
+              const decryptedMeetings = await Promise.all(
+                Object.entries(meetingsData).map(async ([meetingId, encryptedMeeting]: any) => {
+                  try {
+                    const decrypted = await decryptObject(encryptedMeeting);
+                    return {
+                      id: meetingId,
+                      ...decrypted,
+                    };
+                  } catch (err) {
+                    console.error("Decryption failed for meeting:", meetingId, err);
+                    return null;
+                  }
+                })
+              );
+  
+              decryptedMeetings.forEach((meeting) => {
+                if (meeting && meeting.startDate) {
+                  meetingsList.push(meeting);
+                }
               });
             }
-          });
+  
+            setMeetings(meetingsList);
+            setLoading(false);
+          };
+  
+          processMeetings();
+        },
+        (error) => {
+          console.error("Error fetching meetings:", error);
+          setLoading(false);
         }
-
-        setMeetings(meetingsList);
-        setLoading(false);
-      }, (error) => {
-        console.error("Error fetching meetings:", error);
-        setLoading(false);
-      });
+      );
+  
+      return () => unsubscribe();
     };
-
+  
     fetchMeetings();
   }, [adminId, agentId, isAdmin]);
-
+  
   // Filter upcoming meetings for notifications (only future meetings)
   const upcomingMeetings = meetings
     .filter(meeting => {
       try {
         const meetingDate = parseISO(meeting.startDate);
-        const meetingDateTime = meeting.startTime 
+        const meetingDateTime = meeting.startTime
           ? parseISO(`${meeting.startDate}T${meeting.startTime}`)
           : meetingDate;
-        
-        // Only show if meeting is in the future
+  
         return isAfter(meetingDateTime, new Date());
       } catch (error) {
         console.error("Error parsing meeting date:", meeting.startDate, error);
@@ -82,10 +104,10 @@ export const NotificationDropdown: React.FC = () => {
     })
     .sort((a, b) => {
       try {
-        const dateA = a.startTime 
+        const dateA = a.startTime
           ? parseISO(`${a.startDate}T${a.startTime}`)
           : parseISO(a.startDate);
-        const dateB = b.startTime 
+        const dateB = b.startTime
           ? parseISO(`${b.startDate}T${b.startTime}`)
           : parseISO(b.startDate);
         return dateA.getTime() - dateB.getTime();
@@ -93,7 +115,8 @@ export const NotificationDropdown: React.FC = () => {
         return 0;
       }
     })
-    .slice(0, 5); // Show max 5 notifications
+    .slice(0, 5);
+  
 
   const hasNotifications = upcomingMeetings.length > 0;
 

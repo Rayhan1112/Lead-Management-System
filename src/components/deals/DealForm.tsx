@@ -9,6 +9,7 @@ import { database } from '../../firebase';
 import { ref, set, push, onValue, off } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import { decryptObject } from '@/lib/utils';
 
 interface Deal {
   id: string;
@@ -103,28 +104,40 @@ export const DealForm: React.FC<DealFormProps> = ({
   // Fetch leads from Firebase
   useEffect(() => {
     if (!adminId || !isOpen) return;
-
+  
     const leadsRef = ref(database, `users/${adminId}/leads`);
     
     const fetchLeads = () => {
-      onValue(leadsRef, (snapshot) => {
+      onValue(leadsRef, async (snapshot) => {
         const leadsData: Lead[] = [];
+        
+        // Gather all leads from snapshot
         snapshot.forEach((childSnapshot) => {
           leadsData.push({
             id: childSnapshot.key || '',
             ...childSnapshot.val()
           });
         });
-        setLeads(leadsData);
+  
+        // Decrypt all lead objects asynchronously
+        const decryptedLeads = await Promise.all(
+          leadsData.map(async (lead) => {
+            const decryptedLead = await decryptObject(lead);
+            return decryptedLead;
+          })
+        );
+  
+        setLeads(decryptedLeads);
       });
     };
-
+  
     fetchLeads();
-
+  
     return () => {
       off(leadsRef);
     };
   }, [adminId, isOpen]);
+  
 
   // Fetch agents from Firebase
   useEffect(() => {
@@ -297,13 +310,13 @@ export const DealForm: React.FC<DealFormProps> = ({
                       {filteredLeads.length > 0 ? (
                         filteredLeads.map(lead => (
                           <SelectItem key={lead.id} value={lead.id}>
-                            {lead.firstName} {lead.lastName} ({lead.company})
+                            {lead.firstName} {lead.lastName} ({lead.email})
                           </SelectItem>
                         ))
                       ) : (
-                        <SelectItem value="" disabled>
+                        <div className="text-sm text-muted-foreground px-2 py-1.5">
                           No leads found
-                        </SelectItem>
+                        </div>
                       )}
                     </SelectContent>
                   </Select>
@@ -321,11 +334,17 @@ export const DealForm: React.FC<DealFormProps> = ({
                     <SelectValue placeholder="Select agent" />
                   </SelectTrigger>
                   <SelectContent>
-                    {agents.filter(a => a.status === 'active').map(agent => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        {agent.name}
-                      </SelectItem>
-                    ))}
+                    {agents.filter(a => a.status === 'active').length > 0 ? (
+                      agents.filter(a => a.status === 'active').map(agent => (
+                        <SelectItem key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground px-2 py-1.5">
+                        No active agents found
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

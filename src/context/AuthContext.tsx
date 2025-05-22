@@ -1,8 +1,19 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User as FirebaseUser, UserCredential } from 'firebase/auth';
-import { getDatabase, ref, set, get } from 'firebase/database';
+import { 
+  getAuth, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  User as FirebaseUser, 
+  UserCredential,
+  sendEmailVerification,
+  applyActionCode,
+  checkActionCode,
+  verifyBeforeUpdateEmail
+} from 'firebase/auth';
+import { getDatabase, ref, set, get, update } from 'firebase/database';
 
 type UserRole = 'admin' | 'agent' | null;
 
@@ -13,16 +24,22 @@ interface User {
   email: string;
   role: UserRole;
   parentAdminId?: string;
+  name: string;
+  emailVerified?: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   login: (email: string, password: string, role: UserRole) => Promise<UserCredential>;
-  signup: (firstName: string, lastName: string, email: string, password: string, role: UserRole) => Promise<void>;
+  signup: (firstName: string, lastName: string, email: string, password: string, role: UserRole, leadLimit: string, agentLimit: string) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
   isAdmin: boolean;
   isAgent: boolean;
+  sendVerificationEmail: (email: string) => Promise<void>;
+  checkEmailVerification: (email: string) => Promise<boolean>;
+  verifyEmail: (oobCode: string) => Promise<void>;
+  resendVerificationEmail: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,7 +62,6 @@ const database = getDatabase(app);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const navigate = useNavigate();
-  
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
@@ -75,7 +91,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         firstName: userData.firstName,
         lastName: userData.lastName,
         email: firebaseUser.email || '',
-        role: userData.role
+        role: userData.role,
+        emailVerified: firebaseUser.emailVerified
       });
       
       localStorage.setItem('userRole', userData.role || '');
@@ -92,7 +109,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastName: agentData.lastName,
       email: firebaseUser.email || '',
       role: 'agent',
-      parentAdminId: agentData.parentAdminId
+      parentAdminId: agentData.parentAdminId,
+      emailVerified: firebaseUser.emailVerified
     });
     localStorage.setItem('userRole', 'agent');
     localStorage.setItem('agentkey', firebaseUser.uid);
@@ -133,10 +151,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (firstName: string, lastName: string, email: string, password: string, role: UserRole,leadLimit:string,agentLimit:string) => {
+  const signup = async (firstName: string, lastName: string, email: string, password: string, role: UserRole, leadLimit: string, agentLimit: string) => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
+      
+      // Send verification email immediately after signup
+      await sendEmailVerification(firebaseUser);
       
       await set(ref(database, `users/${firebaseUser.uid}`), {
         firstName,
@@ -145,9 +166,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role,
         createdAt: new Date().toISOString(),
         leadLimit,
-        agentLimit
-
-        
+        agentLimit,
+        emailVerified: false // Initially false until verified
       });
 
       setUser({
@@ -155,28 +175,119 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         firstName,
         lastName,
         email,
-        role
+        role,
+        emailVerified: false
       });
 
-      localStorage.setItem('userRole', role || '');
-      if (role === 'admin') {
-        localStorage.setItem('adminkey', firebaseUser.uid);
-      }
-
-      navigate('/dashboard');
     } catch (error: any) {
       throw new Error(error.message);
     }
   };
 
+  const sendVerificationEmail = async (email: string) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        throw new Error('No user is currently signed in');
+      }
+      
+      // Check when last verification was sent
+      const lastSent = localStorage.getItem(`lastVerificationSent_${user.uid}`);
+      if (lastSent) {
+        const lastSentTime = parseInt(lastSent, 10);
+        const now = Date.now();
+        const cooldownPeriod = 60 * 1000; // 1 minute cooldown
+        
+        if (now - lastSentTime < cooldownPeriod) {
+          throw new Error('Please wait before requesting another verification email');
+        }
+      }
+      
+      await sendEmailVerification(user);
+      localStorage.setItem(`lastVerificationSent_${user.uid}`, Date.now().toString());
+      
+    } catch (error: any) {
+      if (error.code === 'auth/too-many-requests') {
+        throw new Error('Too many verification requests. Please try again later.');
+      }
+      throw new Error(error.message || 'Failed to send verification email');
+    }
+  };
+
+  const checkEmailVerification = async (email: string): Promise<boolean> => {
+    try {
+      // Reload the user to get fresh email verification status
+      await auth.currentUser?.reload();
+      const currentUser = auth.currentUser;
+      
+      if (!currentUser) {
+        throw new Error('No user is currently signed in');
+      }
+      
+      // Also check our database for consistency
+      const userRef = ref(database, `users/${currentUser.uid}`);
+      const snapshot = await get(userRef);
+      
+      if (snapshot.exists()) {
+        const userData = snapshot.val();
+        return currentUser.emailVerified && (userData.emailVerified === true);
+      }
+      
+      return currentUser.emailVerified;
+    } catch (error: any) {
+      console.error('Error checking email verification:', error);
+      throw new Error(error.message || 'Failed to check email verification status');
+    }
+  };
+
+  const verifyEmail = async (oobCode: string) => {
+    try {
+      // Verify the action code
+      await applyActionCode(auth, oobCode);
+      
+      // Update email verification status in database
+      const user = auth.currentUser;
+      if (user) {
+        await update(ref(database, `users/${user.uid}`), {
+          emailVerified: true
+        });
+        
+        // Reload user to get fresh data
+        await handleUserAuth(user);
+      }
+    } catch (error: any) {
+      throw new Error(error.message || 'Email verification failed');
+    }
+  };
+
+  const resendVerificationEmail = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        throw new Error('No user is currently signed in');
+      }
+      await sendEmailVerification(user);
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to resend verification email');
+    }
+  };
+  
+
   const login = async (email: string, password: string, role: UserRole): Promise<UserCredential> => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const firebaseUser = userCredential.user;
+      
+      // Check if email is verified
+      if (!firebaseUser.emailVerified) {
+        await auth.signOut();
+        throw new Error('Please verify your email before logging in. Check your inbox for the verification link.');
+      }
       
       if (role === 'agent') {
         const agentCheck = await checkIfAgentExists(email);
         if (!agentCheck) {
-          await auth.signOut(); // Sign out if not a valid agent
+          await auth.signOut();
           throw new Error('Agent not found under any admin account');
         }
       } else {
@@ -184,17 +295,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const snapshot = await get(userRef);
         
         if (!snapshot.exists()) {
-          await auth.signOut(); // Sign out if user doesn't exist
+          await auth.signOut();
           throw new Error('User not found');
         }
   
         const userData = snapshot.val();
         if (userData.role !== role) {
-          await auth.signOut(); // Sign out if role doesn't match
+          await auth.signOut();
           throw new Error(`Invalid role. Expected ${role} but found ${userData.role}`);
         }
   
-        // Additional check for email match
         if (userData.email !== email) {
           await auth.signOut();
           throw new Error('Email mismatch in database');
@@ -203,7 +313,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
       return userCredential;
     } catch (error: any) {
-      // If Firebase auth succeeds but our checks fail, make sure to sign out
       if (auth.currentUser) {
         await auth.signOut();
       }
@@ -229,6 +338,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAuthenticated: !!user,
     isAdmin: user?.role === 'admin',
     isAgent: user?.role === 'agent',
+    sendVerificationEmail,
+    checkEmailVerification,
+    verifyEmail,
+    resendVerificationEmail
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

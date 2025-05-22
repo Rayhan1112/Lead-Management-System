@@ -7,10 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { format } from 'date-fns';
 import { database } from '../../firebase';
-import { get,ref, push, set,child, update } from 'firebase/database';
+import { ref, push, set, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
-import PlanModal from '@/pages/PlanModel';
 
 interface RealEstateLead {
   id?: string;
@@ -66,8 +65,6 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-    const [showModal, setShowModal] = useState(false);
-  
 
   // Initialize form with lead data when editing
   useEffect(() => {
@@ -123,79 +120,18 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
       setError('User not authenticated');
       return;
     }
-  
+
     setIsSubmitting(true);
     setError('');
-  
+
     try {
-      // Get the admin ID (for agents, we use the stored adminKey; for admins, we use their own UID)
-      const adminId = localStorage.getItem('role') === 'agent' 
-        ? localStorage.getItem('adminKey')
-        : currentUser;
-  
-      if (!adminId) {
-        throw new Error('Admin ID not found');
-      }
-  
-      // References for lead limit and current leads
-      const leadLimitRef = ref(database, `users/${adminId}/leadLimit`);
-      const leadsRef = ref(database, `users/${adminId}/leads`);
-      
-      // Get both values from Firebase
-      const [limitSnapshot, leadsSnapshot] = await Promise.all([
-        get(leadLimitRef),
-        get(leadsRef)
-      ]);
-  
-      const leadLimit = limitSnapshot.exists() ? limitSnapshot.val() : 0;
-      const currentLeads = leadsSnapshot.exists() ? leadsSnapshot.val() : {};
-      const currentLeadCount = Object.keys(currentLeads).length;
-  
-      // Check lead limit
-      if (currentLeadCount >= leadLimit) {
-        setError(`You've reached your lead limit of ${leadLimit}. Please upgrade your plan to add more leads.`);
-        setShowModal(true);
-        onClose();
-        return;
-      }
-  
-      // Generate a new lead ID
-      const newLeadId = push(child(ref(database), 'leads')).key;
-      
-      // Prepare lead data with additional metadata
-      const leadData = {
-        ...formData,
-        id: newLeadId,
-        createdAt: new Date().toISOString(),
-        createdBy: currentUser,
-        status: 'new', // default status
-        lastUpdated: new Date().toISOString()
-      };
-  
-      // Save the lead under the admin's leads
-      await set(child(leadsRef, newLeadId), leadData);
-  
-      // If you want to also store a reference under the agent who created it (for agents)
-      if (localStorage.getItem('role') === 'agent') {
-        const agentLeadsRef = ref(database, `agents/${adminId}/leads/${newLeadId}`);
-        await set(agentLeadsRef, { 
-          leadId: newLeadId,
-          assignedAt: new Date().toISOString()
-        });
-      }
-  
-      // Call the original onSubmit callback if needed
-      if (onSubmit) {
-        await onSubmit(leadData);
-      }
-  
+      // Call the onSubmit prop with the form data
+      onSubmit(formData);
       onClose();
-      toast.success('Lead added successfully!');
-      
     } catch (err) {
       console.error('Error saving lead:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save lead. Please try again.');
-    } finally {
+      setError('Failed to save lead. Please try again.');
+      } finally {
       setIsSubmitting(false);
     }
   };
@@ -503,8 +439,6 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
           </Button>
         </DialogFooter>
       </DialogContent>
-      <PlanModal isOpen={showModal} onClose={() => setShowModal(false)} />
-
     </Dialog>
   );
 };
