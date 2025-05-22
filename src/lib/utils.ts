@@ -7,7 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 
 // encryptionUtils.ts
 export const getEncryptionKey = async (): Promise<CryptoKey> => {
-  const KEY_NAME = 'firebase-encryption-key';
+  const KEY_NAME = 'mumbai-ka-sea-face-office';
   
   const storedKey = localStorage.getItem(KEY_NAME);
   if (storedKey) {

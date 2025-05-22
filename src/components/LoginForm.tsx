@@ -9,14 +9,6 @@ import { ref, get, update } from 'firebase/database';
 import { signInWithEmailAndPassword, getAuth, onAuthStateChanged } from 'firebase/auth';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
-// At the top of your component, you can add a helper function:
-const logUserKeys = () => {
-  console.log('LocalStorage keys:');
-  console.log('adminKey:', localStorage.getItem('adminKey'));
-  console.log('agentKey:', localStorage.getItem('agentKey'));
-  console.log('agentLimit:', localStorage.getItem('agentLimit'));
-  console.log('leadLimit:', localStorage.getItem('leadLimit'));
-};
 
 export const LoginForm: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -27,35 +19,42 @@ export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
   const auth = getAuth();
 
+  // Helper function to show current keys in toast
+  const showStoredKeys = () => {
+    const adminKey = localStorage.getItem('adminKey');
+    const agentKey = localStorage.getItem('agentKey');
+    
+    toast.message('Current Session Keys', {
+      description: `Admin: ${adminKey || 'None'}\nAgent: ${agentKey || 'None'}`,
+      duration: 3000,
+    });
+  };
+
   // Check auth state on component mount
-  // Inside your auth state check (useEffect)
-useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, async (user) => {
-    console.log('onAuthStateChanged fired, user:', user ? user.uid : null);
-    if (user) {
-      try {
-        const userRef = ref(database, 'users');
-        const snapshot = await get(userRef);
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userRef = ref(database, 'users');
+          const snapshot = await get(userRef);
 
-        if (snapshot.exists()) {
-          const users = snapshot.val();
-          let userFound = false;
-          let userRole = '';
-          let adminId = '';
+          if (snapshot.exists()) {
+            const users = snapshot.val();
+            let userFound = false;
+            let userRole = '';
+            let adminId = '';
 
-          for (const [dbAdminId, adminData] of Object.entries(users)) {
-            const admin = adminData as any;
-
-            if (dbAdminId === user.uid) {
+            // Check if user is admin
+            if (users[user.uid]) {
               userRole = 'admin';
-              adminId = dbAdminId;
+              adminId = user.uid;
               userFound = true;
-              break;
-            }
-
-            if (admin.agents) {
-              for (const [agentId, agentData] of Object.entries(admin.agents)) {
-                if (agentId === user.uid) {
+            } 
+            // If not admin, check if user is agent
+            else {
+              for (const [dbAdminId, adminData] of Object.entries(users)) {
+                const admin = adminData as any;
+                if (admin.agents && admin.agents[user.uid]) {
                   userRole = 'agent';
                   adminId = dbAdminId;
                   userFound = true;
@@ -63,78 +62,71 @@ useEffect(() => {
                 }
               }
             }
-            if (userFound) break;
-          }
 
-          console.log(`User found in DB: ${userFound}, Role: ${userRole}, AdminId: ${adminId}`);
-
-          if (userFound) {
-            if (!isLoading) {
+            if (userFound) {
               localStorage.setItem('adminKey', adminId);
               if (userRole === 'agent') {
                 localStorage.setItem('agentKey', user.uid);
               } else {
                 localStorage.removeItem('agentKey');
               }
-              logUserKeys();
+              
+              // Show stored keys in toast
+              showStoredKeys();
               navigate('/dashboard');
+            } else {
+              await auth.signOut();
+              localStorage.clear();
+              toast.error('User not found in database');
             }
-          } else {
-            await auth.signOut();
-            localStorage.clear();
-            console.warn('User authenticated but not found in database - signed out');
           }
+        } catch (error) {
+          console.error('Auth state check error:', error);
+          toast.error('Authentication check failed');
         }
-      } catch (error) {
-        console.error('Auth state check error:', error);
       }
+      setIsCheckingAuth(false);
+    });
+
+    return () => unsubscribe();
+  }, [auth, navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      toast.error('Please enter email and password');
+      return;
     }
-    setIsCheckingAuth(false);
-  });
 
-  return () => unsubscribe();
-}, [auth, navigate, isLoading]);
+    setIsLoading(true);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
 
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  console.log('Login attempt:', { email, role });
-  if (!email || !password) {
-    toast.error('Please enter email and password');
-    return;
-  }
+      const userRef = ref(database, 'users');
+      const snapshot = await get(userRef);
 
-  setIsLoading(true);
-  try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    console.log('Firebase Auth success:', { uid: user.uid });
+      if (snapshot.exists()) {
+        const users = snapshot.val();
+        let userFound = false;
+        let userRole = '';
+        let adminId = '';
+        let agentLimit = 0;
+        let leadLimit = 0;
 
-    const userRef = ref(database, 'users');
-    const snapshot = await get(userRef);
-
-    if (snapshot.exists()) {
-      const users = snapshot.val();
-      let userFound = false;
-      let userRole = '';
-      let adminId = '';
-      let agentLimit = 0;
-      let leadLimit = 0;
-
-      for (const [dbAdminId, adminData] of Object.entries(users)) {
-        const admin = adminData as any;
-
-        if (dbAdminId === user.uid) {
+        // Check admin first
+        if (users[user.uid]) {
           userRole = 'admin';
-          adminId = dbAdminId;
-          agentLimit = admin.agentLimit || 0;
-          leadLimit = admin.leadLimit || 0;
+          adminId = user.uid;
+          agentLimit = users[user.uid].agentLimit || 0;
+          leadLimit = users[user.uid].leadLimit || 0;
           userFound = true;
-          break;
-        }
-
-        if (admin.agents) {
-          for (const [agentId, agentData] of Object.entries(admin.agents)) {
-            if (agentId === user.uid) {
+        } 
+        // Check agents if not admin
+        else {
+          for (const [dbAdminId, adminData] of Object.entries(users)) {
+            const admin = adminData as any;
+            if (admin.agents && admin.agents[user.uid]) {
               userRole = 'agent';
               adminId = dbAdminId;
               agentLimit = admin.agentLimit || 0;
@@ -144,57 +136,55 @@ const handleSubmit = async (e: React.FormEvent) => {
             }
           }
         }
-        if (userFound) break;
+
+        if (!userFound) {
+          await auth.signOut();
+          throw new Error('User not found in database');
+        }
+
+        if (userRole !== role) {
+          await auth.signOut();
+          throw new Error(`Please login as ${userRole}`);
+        }
+
+        // Store keys and limits
+        localStorage.setItem('adminKey', adminId);
+        localStorage.setItem('agentLimit', agentLimit.toString());
+        localStorage.setItem('leadLimit', leadLimit.toString());
+
+        if (userRole === 'admin') {
+          localStorage.removeItem('agentKey');
+          toast.success('Welcome back, Admin!');
+        } else {
+          localStorage.setItem('agentKey', user.uid);
+          toast.success('Welcome back, Agent!');
+
+          // Update last login time
+          const now = new Date();
+          const formattedDate = now.toLocaleString();
+          const agentRef = ref(database, `users/${adminId}/agents/${user.uid}`);
+          await update(agentRef, { lastLogin: formattedDate });
+        }
+
+        // Show stored keys
+        showStoredKeys();
+        navigate('/dashboard');
       }
-
-      console.log('User DB lookup:', { userFound, userRole, adminId, agentLimit, leadLimit });
-
-      if (!userFound) {
-        await auth.signOut();
-        throw new Error('User not found in database');
-      }
-
-      if (userRole !== role) {
-        await auth.signOut();
-        throw new Error(`Please login as ${userRole} instead of ${role}`);
-      }
-
-      localStorage.setItem('adminKey', adminId);
-      localStorage.setItem('agentLimit', agentLimit.toString());
-      localStorage.setItem('leadLimit', leadLimit.toString());
-
-      if (userRole === 'admin') {
-        localStorage.removeItem('agentKey');
-        toast.success('Welcome back, Admin!');
-      } else {
-        localStorage.setItem('agentKey', user.uid);
-        toast.success('Welcome back, Agent!');
-
-        const now = new Date();
-        const formattedDate = now.toLocaleString();
-        const agentRef = ref(database, `users/${adminId}/agents/${user.uid}`);
-        await update(agentRef, { lastLogin: formattedDate });
-      }
-
-      logUserKeys();
-      navigate('/dashboard');
+    } catch (error: any) {
+      console.error('Login error:', error);
+      let errorMessage = 'Login failed. Please check your credentials.';
+      if (error.code === 'auth/user-not-found') errorMessage = 'No user found with this email.';
+      else if (error.code === 'auth/wrong-password') errorMessage = 'Incorrect password.';
+      else if (error.message.includes('Please login as')) errorMessage = error.message;
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
     }
-  } catch (error: any) {
-    console.error('Login error:', error);
-    let errorMessage = 'Login failed. Please check your credentials.';
-    if (error.code === 'auth/user-not-found') errorMessage = 'No user found with this email.';
-    else if (error.code === 'auth/wrong-password') errorMessage = 'Incorrect password.';
-    else if (error.message.includes('Please login as')) errorMessage = error.message;
-    toast.error(errorMessage);
-  } finally {
-    setIsLoading(false);
-  }
-};
-  
+  };
 
   if (isCheckingAuth) {
     return (
-      <div className="flex items-center justify-center ">
+      <div className="flex items-center justify-center">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -250,7 +240,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 onSubmit={handleSubmit}
                 className="neuro p-6 space-y-12"
               >
-                 <div className="space-y-2">
+                <div className="space-y-2">
                   <h2 className="text-2xl font-bold text-center text-pulse">Admin Login</h2>
                   <p className="text-sm text-muted-foreground text-center">
                     Access your admin dashboard
@@ -325,7 +315,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 onSubmit={handleSubmit}
                 className="neuro p-6 space-y-12"
               >
-                 <div className="space-y-2">
+                <div className="space-y-2">
                   <h2 className="text-2xl font-bold text-center text-pulse">Agent Login</h2>
                   <p className="text-sm text-muted-foreground text-center">
                     Access your agent dashboard
