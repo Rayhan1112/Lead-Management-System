@@ -65,6 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const adminId = localStorage.getItem('adminkey');
   const agentId = localStorage.getItem('agentkey') || user?.uid;
+  const role = localStorage.getItem('userRole');
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
@@ -328,20 +329,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
 
+
     try {
       await signOut(auth);
       clearAuthState();
       navigate('/login');
-      const logoutRef = ref(database, `users/${adminId}/agents/${agentId}`);
-      const now = new Date().toLocaleString(); // or toISOString()
-      try {
-        await update(logoutRef, {
-          logoutTime: now
-        });
-        localStorage.clear()
-      } catch (error) {
-        console.error('Failed to update logout time:', error);
+
+      if(role == 'agent'){
+        const logoutRef = ref(database, `users/${adminId}/agents/${agentId}`);
+        const now = new Date().toLocaleString(); // or toISOString()
+        try {
+          await update(logoutRef, {
+            logoutTime: now
+          });
+          localStorage.clear()
+        } catch (error) {
+          console.error('Failed to update logout time:', error);
+        }
       }
+     
 
 
     } catch (error: any) {
