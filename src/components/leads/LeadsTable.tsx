@@ -26,7 +26,7 @@ import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { decryptObject, encryptObject, encryptValue } from '@/lib/utils';
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { logAgentActivity } from '../../lib/activityLogger';
+import { logAgentActivity } from '../../logAgentAction';
 
 interface Lead {
   id: string;
@@ -88,65 +88,65 @@ export const LeadsTable: React.FC = () => {
   const [isBulkScheduling, setIsBulkScheduling] = useState(false);
   const [mobileSelectMode, setMobileSelectMode] = useState(false);
 
-// Pagination state
-const [currentPage, setCurrentPage] = useState(1);
-const [leadsPerPage] = useState(10);
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [leadsPerPage] = useState(10);
 
-useEffect(() => {
-  if (!adminId) return;
+  useEffect(() => {
+    if (!adminId) return;
 
-  const fetchLeads = async () => {
-    const leadsRef = ref(database, `users/${adminId}/leads`);
+    const fetchLeads = async () => {
+      const leadsRef = ref(database, `users/${adminId}/leads`);
 
-    onValue(leadsRef, (snapshot) => {
-      const leadsData = snapshot.val();
+      onValue(leadsRef, (snapshot) => {
+        const leadsData = snapshot.val();
 
-      if (!leadsData) {
-        setLeads([]);
-        return;
-      }
-
-      try {
-        const leadEntries = Object.entries(leadsData);
-        
-        // Convert to Lead array with IDs
-        const allLeads = leadEntries.map(([pushKey, leadData]) => ({
-          ...leadData as Lead,
-          id: pushKey
-        }));
-
-        console.log("✅ Leads:", allLeads);
-
-        if (isAdmin) {
-          setLeads(allLeads);
-        } else {
-          if (!agentId) return;
-
-          const agentRef = ref(database, `users/${adminId}/agents/${agentId}`);
-          onValue(agentRef, (agentSnapshot) => {
-            const agentData = agentSnapshot.val();
-            const fromPosition = parseInt(agentData?.from || 'NaN');
-            const toPosition = parseInt(agentData?.to || '0');
-            const safeFrom = Math.max(1, fromPosition);
-            const safeTo = Math.min(allLeads.length, toPosition);
-
-            setCurrentAgentRange({ from: safeFrom, to: safeTo });
-
-            const slicedLeads = allLeads.slice(safeFrom - 1, safeTo);
-            setLeads(slicedLeads);
-            setCurrentPage(1);
-          });
+        if (!leadsData) {
+          setLeads([]);
+          return;
         }
-      } catch (err) {
-        console.error("❌ Unexpected error while processing leads:", err);
-        setLeads([]);
-      }
-    });
-  };
 
-  fetchLeads();
-}, [adminId, agentId, isAdmin]);
-  
+        try {
+          const leadEntries = Object.entries(leadsData);
+
+          // Convert to Lead array with IDs
+          const allLeads = leadEntries.map(([pushKey, leadData]) => ({
+            ...leadData as Lead,
+            id: pushKey
+          }));
+
+          console.log("✅ Leads:", allLeads);
+
+          if (isAdmin) {
+            setLeads(allLeads);
+          } else {
+            if (!agentId) return;
+
+            const agentRef = ref(database, `users/${adminId}/agents/${agentId}`);
+            onValue(agentRef, (agentSnapshot) => {
+              const agentData = agentSnapshot.val();
+              const fromPosition = parseInt(agentData?.from || 'NaN');
+              const toPosition = parseInt(agentData?.to || '0');
+              const safeFrom = Math.max(1, fromPosition);
+              const safeTo = Math.min(allLeads.length, toPosition);
+
+              setCurrentAgentRange({ from: safeFrom, to: safeTo });
+
+              const slicedLeads = allLeads.slice(safeFrom - 1, safeTo);
+              setLeads(slicedLeads);
+              setCurrentPage(1);
+            });
+          }
+        } catch (err) {
+          console.error("❌ Unexpected error while processing leads:", err);
+          setLeads([]);
+        }
+      });
+    };
+
+    fetchLeads();
+  }, [adminId, agentId, isAdmin]);
+
 
 
   // Reset bulk selection when leads change
@@ -199,7 +199,7 @@ useEffect(() => {
     }
     setIsSelectAll(!isSelectAll);
   };
-  
+
   const toggleSelectLead = (leadId: string) => {
     setSelectedLeads(prev =>
       prev.includes(leadId)
@@ -208,7 +208,8 @@ useEffect(() => {
     );
   };
 
- // Bulk actions
+  // Bulk actions
+// Update handleBulkStatusChange
 const handleBulkStatusChange = async (newStatus: string) => {
   if (!adminId || selectedLeads.length === 0) return;
 
@@ -220,6 +221,22 @@ const handleBulkStatusChange = async (newStatus: string) => {
     }), {});
 
     await update(ref(database), updates);
+    
+    // Log bulk status change activity
+    if (agentId) {
+      await logAgentActivity({
+        agentId,
+        leadId: 'multiple', // or you could log each lead individually
+        activityType: 'bulk_action',
+        activityDetails: `Bulk status change to ${newStatus} for ${selectedLeads.length} leads`,
+        metadata: {
+          newStatus,
+          count: selectedLeads.length,
+          leadIds: selectedLeads
+        }
+      });
+    }
+
     toast.success(`${selectedLeads.length} leads updated`);
     setSelectedLeads([]);
     setIsSelectAll(false);
@@ -229,24 +246,24 @@ const handleBulkStatusChange = async (newStatus: string) => {
   }
 };
 
-// Add/Update Lead
-const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
-  if (!adminId) return false;
+  // Add/Update Lead
+  const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
+    if (!adminId) return false;
 
-  try {
-    const newLeadRef = push(ref(database, `users/${adminId}/leads`));
-    await set(newLeadRef, {
-      ...newLead,
-      updatedAt: new Date().toISOString()
-    });
-    toast.success('Lead added successfully');
-    return true;
-  } catch (error) {
-    toast.error('Failed to add lead');
-    console.error('Error adding lead:', error);
-    return false;
-  }
-};
+    try {
+      const newLeadRef = push(ref(database, `users/${adminId}/leads`));
+      await set(newLeadRef, {
+        ...newLead,
+        updatedAt: new Date().toISOString()
+      });
+      toast.success('Lead added successfully');
+      return true;
+    } catch (error) {
+      toast.error('Failed to add lead');
+      console.error('Error adding lead:', error);
+      return false;
+    }
+  };
 
   const handleBulkDelete = async () => {
     if (!isAdmin) {
@@ -275,37 +292,58 @@ const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
     }
   };
 
-  // Call scheduling
-  const handleScheduleCall = async () => {
-    if (!adminId || !callScheduleDate) return;
-  
-    const leadIds = isBulkScheduling ? selectedLeads : [selectedLead?.id].filter(Boolean) as string[];
-    if (leadIds.length === 0) return;
-  
-    try {
-      const scheduleDateTime = `${format(callScheduleDate, 'yyyy-MM-dd')}T${callScheduleTime}`;
-  
-      const updates = leadIds.reduce((acc, leadId) => ({
-        ...acc,
-        [`users/${adminId}/leads/${leadId}/scheduledCall`]: scheduleDateTime,
-        [`users/${adminId}/leads/${leadId}/updatedAt`]: new Date().toISOString()
-      }), {});
-  
-      await update(ref(database), updates);
-  
-      const message = leadIds.length === 1
-        ? 'Call scheduled successfully'
-        : `${leadIds.length} calls scheduled successfully`;
-      toast.success(message);
-      setShowScheduleCall(false);
-      setCallScheduleDate(new Date());
-      setCallScheduleTime('09:00');
-      setSelectedLead(null);
-    } catch (error) {
-      toast.error('Failed to schedule call');
-      console.error('Error scheduling call:', error);
+// Update handleScheduleCall
+const handleScheduleCall = async () => {
+  if (!adminId || !callScheduleDate) return;
+
+  const leadIds = isBulkScheduling ? selectedLeads : [selectedLead?.id].filter(Boolean) as string[];
+  if (leadIds.length === 0) return;
+
+  try {
+    const scheduleDateTime = `${format(callScheduleDate, 'yyyy-MM-dd')}T${callScheduleTime}`;
+
+    const updates = leadIds.reduce((acc, leadId) => ({
+      ...acc,
+      [`users/${adminId}/leads/${leadId}/scheduledCall`]: scheduleDateTime,
+      [`users/${adminId}/leads/${leadId}/updatedAt`]: new Date().toISOString()
+    }), {});
+
+    await update(ref(database), updates);
+
+    // Log scheduling activity
+    if (agentId) {
+      const activityType = isBulkScheduling ? 'bulk_action' : 'schedule_call';
+      const activityDetails = isBulkScheduling 
+        ? `Scheduled calls for ${leadIds.length} leads` 
+        : `Scheduled call with ${selectedLead?.firstName} ${selectedLead?.lastName}`;
+
+      await logAgentActivity({
+        agentId,
+        leadId: isBulkScheduling ? 'multiple' : leadIds[0],
+        activityType,
+        activityDetails,
+        metadata: {
+          scheduledTime: scheduleDateTime,
+          leadIds: isBulkScheduling ? leadIds : undefined,
+          leadName: !isBulkScheduling ? `${selectedLead?.firstName} ${selectedLead?.lastName}` : undefined
+        }
+      });
     }
-  };
+
+    const message = leadIds.length === 1
+      ? 'Call scheduled successfully'
+      : `${leadIds.length} calls scheduled successfully`;
+    toast.success(message);
+    setShowScheduleCall(false);
+    setCallScheduleDate(new Date());
+    setCallScheduleTime('09:00');
+    setSelectedLead(null);
+  } catch (error) {
+    toast.error('Failed to schedule call');
+    console.error('Error scheduling call:', error);
+  }
+};
+
   const handleSingleScheduleCall = (lead: Lead) => {
     setSelectedLead(lead);
     if (lead.scheduledCall) {
@@ -345,7 +383,7 @@ const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
 
   const handleUpdateLead = async (updatedLead: Lead) => {
     if (!adminId) return;
-  
+
     try {
       await update(ref(database, `users/${adminId}/leads/${updatedLead.id}`), {
         ...updatedLead,
@@ -379,51 +417,78 @@ const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
     }
   };
 
-  const handleAction = (type: string, lead: Lead) => {
-    switch (type) {
-      case 'call':
-        if (lead.phone) {
-          window.open(`tel:${lead.phone}`, '_blank');
-        } else {
-          toast.warning('No phone number available for this lead');
-        }
-        break;
-
-      case 'email':
-        if (lead.email) {
-          window.open(`mailto:${lead.email}?subject=Regarding your property inquiry`, '_blank');
-        } else {
-          toast.warning('No email address available for this lead');
-        }
-        break;
-
-      case 'whatsapp':
-        if (lead.phone) {
-          const cleanedPhone = lead.phone.replace(/\D/g, '');
-          const message = `Hi ${lead.firstName}, I'm following up on your property inquiry.`;
-          window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(message)}`, '_blank');
-        } else {
-          toast.warning('No phone number available for WhatsApp');
-        }
-        break;
-
-      case 'edit':
-        setEditingLead(lead);
-        break;
-
-      case 'view':
-        setSelectedLead(lead);
-        break;
-
-      case 'schedule':
-        handleSingleScheduleCall(lead);
-        break;
-
-      default:
-        break;
+  const handleAction = async (type: string, lead: Lead) => {
+    const activityTypeMap = {
+      'call': 'call',
+      'email': 'email',
+      'whatsapp': 'whatsapp',
+      'edit': 'edit',
+      'view': 'view',
+      'schedule': 'schedule_call'
+    } as const;
+  
+    try {
+      if (agentId) {
+        await logAgentActivity({
+          agentId,
+          leadId: lead.id,
+          activityType: activityTypeMap[type as keyof typeof activityTypeMap],
+          activityDetails: `${type} action performed on lead ${lead.firstName} ${lead.lastName}`,
+          metadata: {
+            leadName: `${lead.firstName} ${lead.lastName}`,
+            leadPhone: lead.phone,
+            leadEmail: lead.email,
+            leadStatus: lead.status
+          }
+        });
+      }
+  
+      switch (type) {
+        case 'call':
+          if (lead.phone) {
+            window.open(`tel:${lead.phone}`, '_blank');
+          } else {
+            toast.warning('No phone number available for this lead');
+          }
+          break;
+  
+        case 'email':
+          if (lead.email) {
+            window.open(`mailto:${lead.email}?subject=Regarding your property inquiry`, '_blank');
+          } else {
+            toast.warning('No email address available for this lead');
+          }
+          break;
+  
+        case 'whatsapp':
+          if (lead.phone) {
+            const cleanedPhone = lead.phone.replace(/\D/g, '');
+            const message = `Hi ${lead.firstName}, I'm following up on your property inquiry.`;
+            window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(message)}`, '_blank');
+          } else {
+            toast.warning('No phone number available for WhatsApp');
+          }
+          break;
+  
+        case 'edit':
+          setEditingLead(lead);
+          break;
+  
+        case 'view':
+          setSelectedLead(lead);
+          break;
+  
+        case 'schedule':
+          handleSingleScheduleCall(lead);
+          break;
+  
+        default:
+          break;
+      }
+    } catch (error) {
+      console.error('Error performing action:', error);
     }
   };
-
   // Export to Excel
   const handleExport = async () => {
     try {
@@ -533,11 +598,11 @@ const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
   // Import Excel Data
   const importLeadsToDatabase = async (leads: Omit<Lead, 'id'>[]) => {
     if (!adminId) throw new Error('Not authenticated');
-  
+
     const leadsRef = ref(database, `users/${adminId}/leads`);
     const batchSize = 10;
     let importedCount = 0;
-  
+
     for (let i = 0; i < leads.length; i += batchSize) {
       const batch = leads.slice(i, i + batchSize);
       const batchPromises = batch.map(lead => {
@@ -548,11 +613,11 @@ const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
           updatedAt: new Date().toISOString()
         });
       });
-  
+
       await Promise.all(batchPromises);
       importedCount += batch.length;
     }
-  
+
     return importedCount;
   };
 
@@ -626,11 +691,11 @@ const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
   const allStatuses = Array.from(
     new Set(leads.map(lead => lead.status).filter(status => status?.trim()))
   );
-  
+
   const allSources = Array.from(
     new Set(leads.map(lead => lead.source).filter(source => source?.trim()))
   );
-  
+
   return (
     <div className="space-y-4">
       {/* Bulk Actions Bar */}
@@ -646,12 +711,12 @@ const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
                 <SelectValue placeholder="Change status..." />
               </SelectTrigger>
               <SelectContent>
-  {allStatuses.map(status => (
-    <SelectItem key={status} value={status}>
-      {status}
-    </SelectItem>
-  ))}
-</SelectContent>
+                {allStatuses.map(status => (
+                  <SelectItem key={status} value={status}>
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
 
             </Select>
 

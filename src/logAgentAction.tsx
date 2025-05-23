@@ -1,25 +1,27 @@
-import { push, ref } from 'firebase/database';
-import { database } from './firebase'; // adjust the path to your Firebase setup
+// lib/activityLogger.ts
+import { database } from './firebase';
+import { ref, push } from 'firebase/database';
 
-export const logAgentAction = async ({
-  adminId,
-  agentId,
-  action,
-  entityType, // 'lead', 'task', etc.
-  entityId = null
-}: {
-  adminId: string;
+interface AgentActivity {
   agentId: string;
-  action: string;
-  entityType: 'lead' | 'task' | 'meeting' | 'deal' | 'dashboard';
-  entityId?: string | null;
-}) => {
-  const timestamp = new Date().toISOString();
-  const logRef = ref(database, `users/${adminId}/agents/${agentId}/auditLogs`);
-  await push(logRef, {
-    action,
-    entityType,
-    entityId,
-    timestamp
-  });
+  leadId: string;
+  activityType: 'view' | 'call' | 'email' | 'whatsapp' | 'edit' | 'status_change' | 'delete' | 'schedule_call' | 'bulk_action';
+  activityDetails: string;
+  timestamp: string;
+  metadata?: Record<string, any>;
+}
+
+export const logAgentActivity = async (activity: Omit<AgentActivity, 'timestamp'>) => {
+  try {
+    const adminId = localStorage.getItem('adminId');
+    if (!adminId) return;
+
+    const activityRef = ref(database, `users/${adminId}/agentActivities`);
+    await push(activityRef, {
+      ...activity,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error logging activity:', error);
+  }
 };
