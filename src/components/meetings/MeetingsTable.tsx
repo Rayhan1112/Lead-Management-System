@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Edit, Trash2, Users, Phone, Mail, MessageSquare, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Edit, Trash2, Users, Phone, Mail, MessageSquare, ChevronLeft, ChevronRight, Calendar, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -9,8 +9,6 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { database } from '../../firebase';
 import { ref, onValue, off, remove, get, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
-import { decryptObject } from '../../lib/utils'; // Import your decryption utility
-
 
 interface Meeting {
   id: string;
@@ -35,6 +33,12 @@ interface Agent {
   phone?: string;
 }
 
+interface Backup {
+  meetings: Meeting[];
+  timestamp: string;
+  deletedMeetings?: Meeting[];
+}
+
 export const MeetingsTable: React.FC = () => {
   const { user, isAdmin } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
@@ -47,9 +51,134 @@ export const MeetingsTable: React.FC = () => {
   const isMobile = useIsMobile();
   const adminId = localStorage.getItem('adminkey');
   const agentId = localStorage.getItem('agentkey');
+  const [showBackup, setShowBackup] = useState(false);
+  const [dailyBackups, setDailyBackups] = useState<Record<string, Backup>>({});
+  const [showDeleted, setShowDeleted] = useState(false);
+
+  const createDailyBackup = (currentMeetings: Meeting[]) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const existingBackup = dailyBackups[today] || { 
+        meetings: [], 
+        deletedMeetings: [], 
+        timestamp: new Date().toISOString() 
+      };
+      
+      const newDeletedMeetings = existingBackup.meetings
+        .filter(prevMeeting => !currentMeetings.some(m => m.id === prevMeeting.id))
+        .filter(meeting => !existingBackup.deletedMeetings?.some(m => m.id === meeting.id));
+
+      const updatedBackup: Backup = {
+        meetings: JSON.parse(JSON.stringify(currentMeetings)),
+        deletedMeetings: [...(existingBackup.deletedMeetings || []), ...newDeletedMeetings],
+        timestamp: new Date().toISOString()
+      };
+
+      const updatedBackups = { ...dailyBackups, [today]: updatedBackup };
+      localStorage.setItem('dailyMeetingsBackups', JSON.stringify(updatedBackups));
+      setDailyBackups(updatedBackups);
+
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      const cleanedBackups: Record<string, Backup> = {};
+      Object.keys(updatedBackups).forEach(date => {
+        if (new Date(date) >= oneWeekAgo) {
+          cleanedBackups[date] = updatedBackups[date];
+        }
+      });
+      localStorage.setItem('dailyMeetingsBackups', JSON.stringify(cleanedBackups));
+    } catch (error) {
+      console.error('Backup failed:', error);
+    }
+  };
+
+  const loadDailyBackups = () => {
+    try {
+      const backups = JSON.parse(localStorage.getItem('dailyMeetingsBackups') || '{}');
+      setDailyBackups(backups);
+    } catch (error) {
+      console.error('Failed to load backups:', error);
+    }
+  };
+
+  const removeMeetingFromAllBackups = (meetingId: string) => {
+    const updatedBackups = { ...dailyBackups };
+    let backupModified = false;
+
+    // Iterate through each backup date
+    Object.keys(updatedBackups).forEach(date => {
+      const backup = updatedBackups[date];
+      const updatedBackup = { ...backup };
+
+      // Check and remove from meetings
+      const meetingIndex = backup.meetings.findIndex(m => m.id === meetingId);
+      if (meetingIndex !== -1) {
+        updatedBackup.meetings = backup.meetings.filter(m => m.id !== meetingId);
+        backupModified = true;
+      }
+
+      // Check and remove from deletedMeetings
+      const deletedIndex = backup.deletedMeetings?.findIndex(m => m.id === meetingId) ?? -1;
+      if (deletedIndex !== -1) {
+        updatedBackup.deletedMeetings = backup.deletedMeetings?.filter(m => m.id !== meetingId) || [];
+        backupModified = true;
+      }
+
+      // Only update if there were changes
+      if (backupModified) {
+        updatedBackups[date] = updatedBackup;
+      }
+    });
+
+    if (backupModified) {
+      localStorage.setItem('dailyMeetingsBackups', JSON.stringify(updatedBackups));
+      setDailyBackups(updatedBackups);
+    }
+  };
+
+  const restoreMeeting = async (meeting: Meeting) => {
+    try {
+      if (isAdmin && adminId) {
+        await update(ref(database, `users/${adminId}/meetingdetails/${meeting.id}`), meeting);
+        if (meeting.participants?.length > 0) {
+          const updates: Record<string, any> = {};
+          meeting.participants.forEach(agentId => {
+            updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meeting.id}`] = meeting;
+          });
+          await update(ref(database), updates);
+        }
+      } else if (agentId && adminId) {
+        await update(ref(database, `users/${adminId}/agents/${agentId}/meetingdetails/${meeting.id}`), meeting);
+        await update(ref(database, `users/${adminId}/meetingdetails/${meeting.id}`), meeting);
+      }
+      
+      // Remove the meeting from all backups after successful restore
+      removeMeetingFromAllBackups(meeting.id);
+      
+      toast.success('Meeting restored successfully');
+    } catch (error) {
+      console.error('Restore failed:', error);
+      toast.error('Failed to restore meeting');
+    }
+  };
+
+  const permanentlyDeleteFromBackup = (date: string, meetingId: string) => {
+    const backup = dailyBackups[date];
+    if (!backup) return;
+
+    const updatedBackup = {
+      ...backup,
+      deletedMeetings: backup.deletedMeetings?.filter(m => m.id !== meetingId) || []
+    };
+
+    const updatedBackups = { ...dailyBackups, [date]: updatedBackup };
+    localStorage.setItem('dailyMeetingsBackups', JSON.stringify(updatedBackups));
+    setDailyBackups(updatedBackups);
+    toast.success('Meeting permanently deleted from backup');
+  };
 
   useEffect(() => {
-    const fetchMeetings = async () => {
+    const fetchMeetings = () => {
       let meetingsRef;
       
       if (isAdmin && adminId) {
@@ -59,45 +188,22 @@ export const MeetingsTable: React.FC = () => {
       } else {
         return;
       }
-  
-      onValue(meetingsRef, async (snapshot) => {
-        const encryptedMeetingsData = snapshot.val();
+
+      onValue(meetingsRef, (snapshot) => {
         const meetingsData: Meeting[] = [];
-  
-        if (encryptedMeetingsData) {
-          // Process meetings in parallel
-          const meetingPromises = Object.keys(encryptedMeetingsData).map(async (meetingId) => {
-            try {
-              const encryptedMeeting = encryptedMeetingsData[meetingId];
-              // Decrypt the meeting data
-              const decryptedMeeting = await decryptObject(encryptedMeeting);
-              
-              return {
-                id: meetingId,
-                ...decryptedMeeting
-              };
-            } catch (error) {
-              console.error(`Error decrypting meeting ${meetingId}:`, error);
-              // Fallback to encrypted data with error flag
-              return {
-                id: meetingId,
-                ...encryptedMeetingsData[meetingId],
-                decryptionError: true
-              };
-            }
-          });
-  
-          // Wait for all meetings to be processed
-          const processedMeetings = await Promise.all(meetingPromises);
-          meetingsData.push(...processedMeetings.filter(m => m !== undefined));
-        }
-        
+        snapshot.forEach((childSnapshot) => {
+          const meeting = {
+            id: childSnapshot.key!,
+            ...childSnapshot.val()
+          };
+          meetingsData.push(meeting);
+        });
         setMeetings(meetingsData);
       });
-  
+
       return () => off(meetingsRef);
     };
-  
+
     const fetchAgents = () => {
       if (!adminId) return;
       
@@ -124,16 +230,29 @@ export const MeetingsTable: React.FC = () => {
           }
         }
       });
-  
+
       return () => off(agentsRef);
     };
-  
+
     fetchMeetings();
     fetchAgents();
   }, [isAdmin, adminId, agentId]);
 
+  useEffect(() => {
+    if (meetings.length > 0) {
+      const timer = setTimeout(() => {
+        createDailyBackup(meetings);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [meetings]);
+
+  useEffect(() => {
+    loadDailyBackups();
+  }, []);
+
   const filteredMeetings = meetings.filter(meeting => {
-    return meeting?.title?.toLowerCase().includes(searchTerm.toLowerCase());
+    return meeting.title.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
   const indexOfLastMeeting = currentPage * meetingsPerPage;
@@ -260,16 +379,27 @@ export const MeetingsTable: React.FC = () => {
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
-        <Button 
-          onClick={() => {
-            setSelectedMeeting(null);
-            setIsAddingMeeting(true);
-          }}
-          className="neuro hover:shadow-none transition-all duration-300 w-full sm:w-auto"
-          disabled={!user}
-        >
-          Schedule Meeting
-        </Button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Button 
+            onClick={() => {
+              setSelectedMeeting(null);
+              setIsAddingMeeting(true);
+            }}
+            className="neuro hover:shadow-none transition-all duration-300 flex-1"
+            disabled={!user}
+          >
+            Schedule Meeting
+          </Button>
+          
+          <Button
+            variant="outline"
+            onClick={() => setShowBackup(!showBackup)}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            {isMobile ? '' : 'Backups'}
+          </Button>
+        </div>
         
         <Input
           placeholder="Search meetings..."
@@ -278,6 +408,115 @@ export const MeetingsTable: React.FC = () => {
           onChange={(e) => setSearchTerm(e.target.value)}
         />
       </div>
+
+      {showBackup && (
+        <div className="neuro p-4 rounded-lg space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="font-medium">Meeting Backups</h3>
+            <div className="flex gap-2">
+              <Button 
+                variant={showDeleted ? "default" : "outline"} 
+                size="sm"
+                onClick={() => setShowDeleted(!showDeleted)}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                {showDeleted ? 'Hide Deleted' : 'Show Deleted'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowBackup(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+
+          {Object.keys(dailyBackups).length > 0 ? (
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              {Object.keys(dailyBackups)
+                .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+                .map(date => {
+                  // Filter out meetings that exist in the current meetings list
+                  const backup = dailyBackups[date];
+                  const filteredMeetings = backup.meetings.filter(
+                    backupMeeting => !meetings.some(currentMeeting => currentMeeting.id === backupMeeting.id)
+                  );
+                  const filteredDeletedMeetings = backup.deletedMeetings?.filter(
+                    deletedMeeting => !meetings.some(currentMeeting => currentMeeting.id === deletedMeeting.id)
+                  );
+
+                  return (
+                    <div key={date} className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <h4 className="font-medium">{date}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {new Date(backup.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+
+                      {filteredMeetings.length > 0 && (
+                        <div className="space-y-2">
+                          {filteredMeetings.map(meeting => (
+                            <div key={meeting.id} className="flex justify-between items-center p-2 border rounded">
+                              <div className="truncate">
+                                <p className="font-medium truncate">{meeting.title}</p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {meeting.startDate} @ {meeting.startTime}
+                                </p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => restoreMeeting(meeting)}
+                              >
+                                Restore
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {showDeleted && filteredDeletedMeetings && filteredDeletedMeetings.length > 0 && (
+                        <div className="space-y-2 mt-4">
+                          <h5 className="text-sm font-medium text-red-500">Deleted Meetings</h5>
+                          {filteredDeletedMeetings.map(meeting => (
+                            <div key={meeting.id} className="flex justify-between items-center p-2 border rounded border-red-200 bg-red-50">
+                              <div className="truncate">
+                                <p className="font-medium text-red-800 truncate">{meeting.title}</p>
+                                <p className="text-xs text-red-600 truncate">
+                                  {meeting.startDate} @ {meeting.startTime}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => restoreMeeting(meeting)}
+                                  className="text-green-600"
+                                >
+                                  Restore
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => permanentlyDeleteFromBackup(date, meeting.id)}
+                                  className="text-red-600"
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No backups available yet
+            </p>
+          )}
+        </div>
+      )}
 
       {filteredMeetings.length > 0 ? (
         <>
@@ -534,7 +773,6 @@ export const MeetingsTable: React.FC = () => {
             ))}
           </div>
 
-          {/* Pagination controls - always shown */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-2 py-4">
             <div className="text-sm text-muted-foreground">
               Showing {indexOfFirstMeeting + 1}-{Math.min(indexOfLastMeeting, filteredMeetings.length)} of {filteredMeetings.length} meetings

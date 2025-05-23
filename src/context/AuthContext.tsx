@@ -63,6 +63,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const navigate = useNavigate();
 
+  const adminId = localStorage.getItem('adminkey');
+  const agentId = localStorage.getItem('agentkey') || user?.uid;
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
@@ -92,7 +95,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastName: userData.lastName,
         email: firebaseUser.email || '',
         role: userData.role,
-        emailVerified: firebaseUser.emailVerified
+        emailVerified: firebaseUser.emailVerified,
+        name: ''
       });
       
       localStorage.setItem('userRole', userData.role || '');
@@ -110,7 +114,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email: firebaseUser.email || '',
       role: 'agent',
       parentAdminId: agentData.parentAdminId,
-      emailVerified: firebaseUser.emailVerified
+      emailVerified: firebaseUser.emailVerified,
+      name: ''
     });
     localStorage.setItem('userRole', 'agent');
     localStorage.setItem('agentkey', firebaseUser.uid);
@@ -176,7 +181,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastName,
         email,
         role,
-        emailVerified: false
+        emailVerified: false,
+        name: ''
       });
 
     } catch (error: any) {
@@ -321,10 +327,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+
     try {
       await signOut(auth);
       clearAuthState();
       navigate('/login');
+      const logoutRef = ref(database, `users/${adminId}/agents/${agentId}`);
+      const now = new Date().toLocaleString(); // or toISOString()
+      try {
+        await update(logoutRef, {
+          logoutTime: now
+        });
+        localStorage.clear()
+      } catch (error) {
+        console.error('Failed to update logout time:', error);
+      }
+
+
     } catch (error: any) {
       throw new Error(error.message);
     }

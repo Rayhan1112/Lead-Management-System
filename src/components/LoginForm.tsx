@@ -10,6 +10,39 @@ import { signInWithEmailAndPassword, getAuth, onAuthStateChanged } from 'firebas
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
+// Encryption key management
+const getEncryptionKey = async (role: 'admin' | 'agent'): Promise<CryptoKey> => {
+  const KEY_NAME = `pulse-crm-${role}-key`;
+  
+  try {
+    const storedKey = localStorage.getItem(KEY_NAME);
+    if (storedKey) {
+      const keyData = JSON.parse(storedKey);
+      return await crypto.subtle.importKey(
+        'jwk',
+        keyData,
+        { name: 'AES-GCM' },
+        true,
+        ['encrypt', 'decrypt']
+      );
+    }
+    
+    const key = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    
+    const exportedKey = await crypto.subtle.exportKey('jwk', key);
+    localStorage.setItem(KEY_NAME, JSON.stringify(exportedKey));
+    
+    return key;
+  } catch (error) {
+    console.error(`Error getting ${role} encryption key:`, error);
+    throw error;
+  }
+};
+
 export const LoginForm: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,14 +52,11 @@ export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
   const auth = getAuth();
 
-  // Helper function to show current keys in toast
-  const showStoredKeys = () => {
-    const adminKey = localStorage.getItem('adminKey');
-    const agentKey = localStorage.getItem('agentKey');
-    
-    toast.message('Current Session Keys', {
-      description: `Admin: ${adminKey || 'None'}\nAgent: ${agentKey || 'None'}`,
-      duration: 3000,
+  // Custom toast function for centered messages
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
+    toast[type](message, {
+      position: 'top-center',
+      duration: 5000,
     });
   };
 
@@ -43,11 +73,13 @@ export const LoginForm: React.FC = () => {
             let userFound = false;
             let userRole = '';
             let adminId = '';
+            let isActive = false;
 
             // Check if user is admin
             if (users[user.uid]) {
               userRole = 'admin';
               adminId = user.uid;
+              isActive = users[user.uid].status === 'active';
               userFound = true;
             } 
             // If not admin, check if user is agent
@@ -57,6 +89,7 @@ export const LoginForm: React.FC = () => {
                 if (admin.agents && admin.agents[user.uid]) {
                   userRole = 'agent';
                   adminId = dbAdminId;
+                  isActive = admin.agents[user.uid].status === 'active';
                   userFound = true;
                   break;
                 }
@@ -64,25 +97,36 @@ export const LoginForm: React.FC = () => {
             }
 
             if (userFound) {
-              localStorage.setItem('adminKey', adminId);
+              if (!isActive) {
+                await auth.signOut();
+                localStorage.clear();
+                // showToast('Your account is currently disabled. Please contact the super admin.');
+                return;
+              }
+
+              // Initialize encryption keys for the role
+              await getEncryptionKey(userRole as 'admin' | 'agent');
+              
+              // Store user identifiers
+              localStorage.setItem('currentRole', userRole);
+              localStorage.setItem('adminId', adminId);
+              
               if (userRole === 'agent') {
-                localStorage.setItem('agentKey', user.uid);
+                localStorage.setItem('agentId', user.uid);
               } else {
-                localStorage.removeItem('agentKey');
+                localStorage.removeItem('agentId');
               }
               
-              // Show stored keys in toast
-              showStoredKeys();
               navigate('/dashboard');
             } else {
               await auth.signOut();
               localStorage.clear();
-              toast.error('User not found in database');
+              showToast('User not found in database');
             }
           }
         } catch (error) {
           console.error('Auth state check error:', error);
-          toast.error('Authentication check failed');
+          showToast('Authentication check failed');
         }
       }
       setIsCheckingAuth(false);
@@ -94,89 +138,106 @@ export const LoginForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      toast.error('Please enter email and password');
+      showToast('Please enter email and password');
       return;
     }
 
     setIsLoading(true);
+    
     try {
+      // 1. Authenticate with Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
+      // 2. Check user in Realtime Database
       const userRef = ref(database, 'users');
       const snapshot = await get(userRef);
 
-      if (snapshot.exists()) {
-        const users = snapshot.val();
-        let userFound = false;
-        let userRole = '';
-        let adminId = '';
-        let agentLimit = 0;
-        let leadLimit = 0;
+      if (!snapshot.exists()) {
+        await auth.signOut();
+        throw new Error('User not found in database');
+      }
 
-        // Check admin first
-        if (users[user.uid]) {
-          userRole = 'admin';
-          adminId = user.uid;
-          agentLimit = users[user.uid].agentLimit || 0;
-          leadLimit = users[user.uid].leadLimit || 0;
-          userFound = true;
-        } 
-        // Check agents if not admin
-        else {
-          for (const [dbAdminId, adminData] of Object.entries(users)) {
-            const admin = adminData as any;
-            if (admin.agents && admin.agents[user.uid]) {
-              userRole = 'agent';
-              adminId = dbAdminId;
-              agentLimit = admin.agentLimit || 0;
-              leadLimit = admin.leadLimit || 0;
-              userFound = true;
-              break;
-            }
+      const users = snapshot.val();
+      let userData: any = null;
+      let isAdmin = false;
+      let isActive = false;
+
+      // 3. Check if user is admin
+      if (users[user.uid]) {
+        userData = users[user.uid];
+        isAdmin = true;
+        isActive = userData.status === 'active';
+      } 
+      // 4. If not admin, check if agent
+      else {
+        for (const adminId in users) {
+          if (users[adminId].agents && users[adminId].agents[user.uid]) {
+            userData = users[adminId].agents[user.uid];
+            userData.adminId = adminId; // Store admin reference
+            isActive = userData.status === 'active';
+            break;
           }
         }
-
-        if (!userFound) {
-          await auth.signOut();
-          throw new Error('User not found in database');
-        }
-
-        if (userRole !== role) {
-          await auth.signOut();
-          throw new Error(`Please login as ${userRole}`);
-        }
-
-        // Store keys and limits
-        localStorage.setItem('adminKey', adminId);
-        localStorage.setItem('agentLimit', agentLimit.toString());
-        localStorage.setItem('leadLimit', leadLimit.toString());
-
-        if (userRole === 'admin') {
-          localStorage.removeItem('agentKey');
-          toast.success('Welcome back, Admin!');
-        } else {
-          localStorage.setItem('agentKey', user.uid);
-          toast.success('Welcome back, Agent!');
-
-          // Update last login time
-          const now = new Date();
-          const formattedDate = now.toLocaleString();
-          const agentRef = ref(database, `users/${adminId}/agents/${user.uid}`);
-          await update(agentRef, { lastLogin: formattedDate });
-        }
-
-        // Show stored keys
-        showStoredKeys();
-        navigate('/dashboard');
       }
+
+      // 5. Strict validation checks
+      if (!userData) {
+        await auth.signOut();
+        throw new Error('User not found in database');
+      }
+
+      // Check active status first
+      if (!isActive) {
+        await auth.signOut();
+        throw new Error('Your account is currently disabled. Please contact the super admin.');
+      }
+
+      const userRole = isAdmin ? 'admin' : 'agent';
+      if (userRole !== role) {
+        await auth.signOut();
+        throw new Error(`Please login as ${userRole}`);
+      }
+
+      // 6. Only proceed if all checks passed
+      await getEncryptionKey(userRole as 'admin' | 'agent');
+
+      // Store user data
+      localStorage.setItem('currentRole', userRole);
+      localStorage.setItem('adminId', isAdmin ? user.uid : userData.adminId);
+      localStorage.setItem('agentLimit', userData.agentLimit?.toString() || '0');
+      localStorage.setItem('leadLimit', userData.leadLimit?.toString() || '0');
+
+      if (userRole === 'agent') {
+        localStorage.setItem('agentId', user.uid);
+        showToast('Welcome back, Agent!', 'success');
+        
+        // Update last login
+        const now = new Date().toLocaleString();
+        await update(ref(database, `users/${userData.adminId}/agents/${user.uid}`), { 
+          lastLogin: now 
+        });
+      } else {
+        localStorage.removeItem('agentId');
+        showToast('Welcome back, Admin!', 'success');
+      }
+
+      // 7. FINAL STEP - Only navigate if everything succeeded
+      navigate('/dashboard');
+
     } catch (error: any) {
       console.error('Login error:', error);
       let errorMessage = 'Login failed. Please check your credentials.';
-      if (error.code === 'auth/user-not-found') errorMessage = 'No user found with this email.';
-      else if (error.code === 'auth/wrong-password') errorMessage = 'Incorrect password.';
-      else if (error.message.includes('Please login as')) errorMessage = error.message;
-      toast.error(errorMessage);
+      
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = 'No user found with this email.';
+      } else if (error.code === 'auth/wrong-password') {
+        errorMessage = 'Incorrect password.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      showToast(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -184,12 +245,12 @@ export const LoginForm: React.FC = () => {
 
   if (isCheckingAuth) {
     return (
-      <div className="flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-screen">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.5 }}
-          className="flex flex-col items-center gap-4 mt-20"
+          className="flex flex-col items-center gap-4"
         >
           <motion.div
             animate={{ rotate: 360 }}
@@ -289,21 +350,6 @@ export const LoginForm: React.FC = () => {
                     'Login as Admin'
                   )}
                 </Button>
-                
-                <div className="space-y-2 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Don't have an account?{' '}
-                    <Link to="/signup" className="text-pulse hover:underline">
-                      Sign up
-                    </Link>
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Forgot your password?{' '}
-                    <Link to="/forgot-password" className="text-pulse hover:underline">
-                      Reset it here
-                    </Link>
-                  </p>
-                </div>
               </motion.form>
             </TabsContent>
             
@@ -364,21 +410,6 @@ export const LoginForm: React.FC = () => {
                     'Login as Agent'
                   )}
                 </Button>
-                
-                <div className="space-y-2 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Don't have an account?{' '}
-                    <Link to="/signup" className="text-pulse hover:underline">
-                      Sign up
-                    </Link>
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Forgot your password?{' '}
-                    <Link to="/forgot-password" className="text-pulse hover:underline">
-                      Reset it here
-                    </Link>
-                  </p>
-                </div>
               </motion.form>
             </TabsContent>
           </Tabs>

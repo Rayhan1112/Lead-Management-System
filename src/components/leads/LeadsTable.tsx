@@ -58,46 +58,6 @@ type AgentActivity = {
   timestamp: string;
   metadata?: Record<string, any>;
 };
-
-// Add these helper functions near your other utility functions
-const logLeadAction = async (
-  adminId: string,
-  agentId: string,
-  leadId: string | string[],
-  activityType: AgentActivity['activityType'],
-  details: Record<string, any> = {}
-) => {
-  const leadIds = Array.isArray(leadId) ? leadId : [leadId];
-  
-  await Promise.all(leadIds.map(async (id) => {
-    await logAgentActivity(adminId, {
-      agentId,
-      leadId: id,
-      activityType,
-      activityDetails: details,
-      timestamp: new Date().toISOString(),
-      metadata: {
-        actionCount: leadIds.length,
-        isBulk: leadIds.length > 1
-      }
-    });
-  }));
-};
-
-const logViewActivity = async (adminId: string, agentId: string, lead: Lead) => {
-  await logLeadAction(adminId, agentId, lead.id, 'view', {
-    leadName: `${lead.firstName} ${lead.lastName}`,
-    status: lead.status
-  });
-};
-
-const logEditActivity = async (adminId: string, agentId: string, lead: Lead, changes: Record<string, any>) => {
-  await logLeadAction(adminId, agentId, lead.id, 'edit', {
-    leadName: `${lead.firstName} ${lead.lastName}`,
-    changes,
-    previousData: lead
-  });
-};
 export const LeadsTable: React.FC = () => {
   const adminId = localStorage.getItem('adminkey');
   const agentId = localStorage.getItem('agentkey');
@@ -128,89 +88,64 @@ export const LeadsTable: React.FC = () => {
   const [isBulkScheduling, setIsBulkScheduling] = useState(false);
   const [mobileSelectMode, setMobileSelectMode] = useState(false);
 
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [leadsPerPage] = useState(10);
+// Pagination state
+const [currentPage, setCurrentPage] = useState(1);
+const [leadsPerPage] = useState(10);
 
+useEffect(() => {
+  if (!adminId) return;
 
-  useEffect(() => {
-    if (!adminId) return;
-  
-    const fetchAndDecryptLeads = async () => {
-      const leadsRef = ref(database, `users/${adminId}/leads`);
-  
-      onValue(leadsRef, async (snapshot) => {
-        const leadsData = snapshot.val();
-  
-        if (!leadsData) {
-          setLeads([]);
-          return;
+  const fetchLeads = async () => {
+    const leadsRef = ref(database, `users/${adminId}/leads`);
+
+    onValue(leadsRef, (snapshot) => {
+      const leadsData = snapshot.val();
+
+      if (!leadsData) {
+        setLeads([]);
+        return;
+      }
+
+      try {
+        const leadEntries = Object.entries(leadsData);
+        
+        // Convert to Lead array with IDs
+        const allLeads = leadEntries.map(([pushKey, leadData]) => ({
+          ...leadData as Lead,
+          id: pushKey
+        }));
+
+        console.log("✅ Leads:", allLeads);
+
+        if (isAdmin) {
+          setLeads(allLeads);
+        } else {
+          if (!agentId) return;
+
+          const agentRef = ref(database, `users/${adminId}/agents/${agentId}`);
+          onValue(agentRef, (agentSnapshot) => {
+            const agentData = agentSnapshot.val();
+            const fromPosition = parseInt(agentData?.from || 'NaN');
+            const toPosition = parseInt(agentData?.to || '0');
+            const safeFrom = Math.max(1, fromPosition);
+            const safeTo = Math.min(allLeads.length, toPosition);
+
+            setCurrentAgentRange({ from: safeFrom, to: safeTo });
+
+            const slicedLeads = allLeads.slice(safeFrom - 1, safeTo);
+            setLeads(slicedLeads);
+            setCurrentPage(1);
+          });
         }
-  
-        try {
-          const leadEntries = Object.entries(leadsData);
-  
-          // Decrypt each lead
-          const decryptedLeads = await Promise.all(
-            leadEntries.map(async ([pushKey, encryptedLead]) => {
-              try {
-                const decrypted = await decryptObject(encryptedLead) as Lead;
-  
-                if (!decrypted) {
-                  console.warn(`Invalid lead data for: ${pushKey}`);
-                  return null;
-                }
-  
-                return {
-                  ...decrypted,
-                  id: pushKey
-                };
-              } catch (error) {
-                console.error('Error decrypting lead:', pushKey, error);
-                return null;
-              }
-            })
-          );
-  
-          // Filter out null entries and assign position
-          const validLeads = decryptedLeads
-            .filter((lead): lead is Lead => lead !== null)
-            .map((lead, index) => ({
-              ...lead,
-              position: index + 1,
-            }));
-  
-          console.log("✅ Decrypted Leads:", validLeads);
-  
-          if (isAdmin) {
-            setLeads(validLeads);
-          } else {
-            if (!agentId) return;
-  
-            const agentRef = ref(database, `users/${adminId}/agents/${agentId}`);
-            onValue(agentRef, (agentSnapshot) => {
-              const agentData = agentSnapshot.val();
-              const fromPosition = parseInt(agentData?.from || 'NaN');
-              const toPosition = parseInt(agentData?.to || '0');
-              const safeFrom = Math.max(1, fromPosition);
-              const safeTo = Math.min(validLeads.length, toPosition);
-  
-              setCurrentAgentRange({ from: safeFrom, to: safeTo });
-  
-              const slicedLeads = validLeads.slice(safeFrom - 1, safeTo);
-              setLeads(slicedLeads);
-              setCurrentPage(1);
-            });
-          }
-        } catch (err) {
-          console.error("❌ Unexpected error while processing leads:", err);
-          setLeads([]);
-        }
-      });
-    };
-  
-    fetchAndDecryptLeads();
-  }, [adminId, agentId, isAdmin]);
+      } catch (err) {
+        console.error("❌ Unexpected error while processing leads:", err);
+        setLeads([]);
+      }
+    });
+  };
+
+  fetchLeads();
+}, [adminId, agentId, isAdmin]);
   
 
 
@@ -256,101 +191,81 @@ export const LeadsTable: React.FC = () => {
   const lastPage = () => setCurrentPage(totalPages);
 
   // Bulk selection handlers
-  // Modify your bulk selection handlers
-const toggleSelectAll = async () => {
-  if (isSelectAll) {
-    setSelectedLeads([]);
-  } else {
-    setSelectedLeads(currentLeads.map(lead => lead.id));
-  }
-  setIsSelectAll(!isSelectAll);
-
-  if (adminId && agentId) {
-    await logAgentActivity(adminId, {
-      agentId,
-      leadId: 'bulk_action',
-      activityType: 'bulk_action',
-      activityDetails: {
-        action: isSelectAll ? 'deselect_all' : 'select_all',
-        count: isSelectAll ? 0 : currentLeads.length
-      },
-      timestamp: new Date().toISOString()
-    });
-  }
-};
-
-const toggleSelectLead = async (leadId: string) => {
-  setSelectedLeads(prev =>
-    prev.includes(leadId)
-      ? prev.filter(id => id !== leadId)
-      : [...prev, leadId]
-  );
-
-  if (adminId && agentId) {
-    await logAgentActivity(adminId, {
-      agentId,
-      leadId,
-      activityType: 'bulk_action',
-      activityDetails: {
-        action: selectedLeads.includes(leadId) ? 'deselect' : 'select'
-      },
-      timestamp: new Date().toISOString()
-    });
-  }
-};
-  // Bulk actions
-  const handleBulkStatusChange = async (newStatus: string) => {
-    if (!adminId || selectedLeads.length === 0 || !agentId) return;
-  
-    try {
-      const encryptedStatus = await encryptValue(newStatus);
-      const encryptedUpdatedAt = await encryptValue(new Date().toISOString());
-  
-      const updates = selectedLeads.reduce((acc, leadId) => ({
-        ...acc,
-        [`users/${adminId}/leads/${leadId}/status`]: encryptedStatus,
-        [`users/${adminId}/leads/${leadId}/updatedAt`]: encryptedUpdatedAt
-      }), {});
-  
-      await update(ref(database), updates);
-      
-      // Log the bulk status change
-      await logLeadAction(adminId, agentId, selectedLeads, 'status_change', {
-        newStatus,
-        leadCount: selectedLeads.length
-      });
-  
-      toast.success(`${selectedLeads.length} leads updated`);
+  const toggleSelectAll = () => {
+    if (isSelectAll) {
       setSelectedLeads([]);
-      setIsSelectAll(false);
-    } catch (error) {
-      toast.error('Failed to update leads');
-      console.error('Bulk update error:', error);
+    } else {
+      setSelectedLeads(currentLeads.map(lead => lead.id));
     }
+    setIsSelectAll(!isSelectAll);
   };
+  
+  const toggleSelectLead = (leadId: string) => {
+    setSelectedLeads(prev =>
+      prev.includes(leadId)
+        ? prev.filter(id => id !== leadId)
+        : [...prev, leadId]
+    );
+  };
+
+ // Bulk actions
+const handleBulkStatusChange = async (newStatus: string) => {
+  if (!adminId || selectedLeads.length === 0) return;
+
+  try {
+    const updates = selectedLeads.reduce((acc, leadId) => ({
+      ...acc,
+      [`users/${adminId}/leads/${leadId}/status`]: newStatus,
+      [`users/${adminId}/leads/${leadId}/updatedAt`]: new Date().toISOString()
+    }), {});
+
+    await update(ref(database), updates);
+    toast.success(`${selectedLeads.length} leads updated`);
+    setSelectedLeads([]);
+    setIsSelectAll(false);
+  } catch (error) {
+    toast.error('Failed to update leads');
+    console.error('Bulk update error:', error);
+  }
+};
+
+// Add/Update Lead
+const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
+  if (!adminId) return false;
+
+  try {
+    const newLeadRef = push(ref(database, `users/${adminId}/leads`));
+    await set(newLeadRef, {
+      ...newLead,
+      updatedAt: new Date().toISOString()
+    });
+    toast.success('Lead added successfully');
+    return true;
+  } catch (error) {
+    toast.error('Failed to add lead');
+    console.error('Error adding lead:', error);
+    return false;
+  }
+};
+
   const handleBulkDelete = async () => {
     if (!isAdmin) {
       toast.error("You do not have permission to delete leads");
       return;
     }
-  
-    if (!adminId || !agentId || selectedLeads.length === 0 || !window.confirm(`Are you sure you want to delete ${selectedLeads.length} leads?`)) return;
-  
+
+    if (!adminId || selectedLeads.length === 0 || !window.confirm(`Are you sure you want to delete ${selectedLeads.length} leads?`)) return;
+
     try {
-      // First log the deletion activity
-      await logLeadAction(adminId, agentId, selectedLeads, 'delete', {
-        leadCount: selectedLeads.length
-      });
-  
       const deletePromises = selectedLeads.map(leadId =>
         remove(ref(database, `users/${adminId}/leads/${leadId}`))
       );
-  
+
       await Promise.all(deletePromises);
       toast.success(`${selectedLeads.length} leads deleted`);
       setSelectedLeads([]);
       setIsSelectAll(false);
-  
+
       if (currentLeads.length === selectedLeads.length && currentPage > 1) {
         setCurrentPage(currentPage - 1);
       }
@@ -359,32 +274,24 @@ const toggleSelectLead = async (leadId: string) => {
       console.error('Bulk delete error:', error);
     }
   };
+
   // Call scheduling
   const handleScheduleCall = async () => {
-    if (!adminId || !agentId || !callScheduleDate) return;
+    if (!adminId || !callScheduleDate) return;
   
     const leadIds = isBulkScheduling ? selectedLeads : [selectedLead?.id].filter(Boolean) as string[];
     if (leadIds.length === 0) return;
   
     try {
       const scheduleDateTime = `${format(callScheduleDate, 'yyyy-MM-dd')}T${callScheduleTime}`;
-      const encryptedSchedule = await encryptValue(scheduleDateTime);
-      const encryptedUpdatedAt = await encryptValue(new Date().toISOString());
   
       const updates = leadIds.reduce((acc, leadId) => ({
         ...acc,
-        [`users/${adminId}/leads/${leadId}/scheduledCall`]: encryptedSchedule,
-        [`users/${adminId}/leads/${leadId}/updatedAt`]: encryptedUpdatedAt
+        [`users/${adminId}/leads/${leadId}/scheduledCall`]: scheduleDateTime,
+        [`users/${adminId}/leads/${leadId}/updatedAt`]: new Date().toISOString()
       }), {});
   
       await update(ref(database), updates);
-  
-      // Log the scheduling activity
-      await logLeadAction(adminId, agentId, leadIds, 'schedule_call', {
-        scheduleDateTime,
-        leadCount: leadIds.length,
-        isBulk: isBulkScheduling
-      });
   
       const message = leadIds.length === 1
         ? 'Call scheduled successfully'
@@ -399,7 +306,6 @@ const toggleSelectLead = async (leadId: string) => {
       console.error('Error scheduling call:', error);
     }
   };
-
   const handleSingleScheduleCall = (lead: Lead) => {
     setSelectedLead(lead);
     if (lead.scheduledCall) {
@@ -435,56 +341,16 @@ const toggleSelectLead = async (leadId: string) => {
     );
   };
 
-  // Add/Update Lead
-  const handleAddLead = async (newLead: Omit<Lead, 'id'>) => {
-    if (!adminId) return false;
 
-    try {
-      const encryptedLead = await encryptObject({
-        ...newLead,
-        updatedAt: new Date().toISOString()
-      });
-
-      const newLeadRef = push(ref(database, `users/${adminId}/leads`));
-      await set(newLeadRef, encryptedLead);
-      toast.success('Lead added successfully');
-      return true;
-    } catch (error) {
-      toast.error('Failed to add lead');
-      console.error('Error adding lead:', error);
-      return false;
-    }
-  };
 
   const handleUpdateLead = async (updatedLead: Lead) => {
-    if (!adminId || !agentId) return;
+    if (!adminId) return;
   
     try {
-      // Get the previous lead data to compare changes
-      const previousLead = leads.find(lead => lead.id === updatedLead.id);
-      
-      if (previousLead) {
-        // Find what changed
-        const changes: Record<string, any> = {};
-        Object.keys(updatedLead).forEach(key => {
-          if (updatedLead[key as keyof Lead] !== previousLead[key as keyof Lead]) {
-            changes[key] = {
-              from: previousLead[key as keyof Lead],
-              to: updatedLead[key as keyof Lead]
-            };
-          }
-        });
-  
-        if (Object.keys(changes).length > 0) {
-          await logEditActivity(adminId, agentId, previousLead, changes);
-        }
-      }
-  
-      const encryptedLead = await encryptObject({
+      await update(ref(database, `users/${adminId}/leads/${updatedLead.id}`), {
         ...updatedLead,
         updatedAt: new Date().toISOString()
       });
-      await update(ref(database, `users/${adminId}/leads/${updatedLead.id}`), encryptedLead);
       toast.success('Lead updated successfully');
     } catch (error) {
       toast.error('Failed to update lead');
@@ -513,70 +379,51 @@ const toggleSelectLead = async (leadId: string) => {
     }
   };
 
-  const handleAction = async (type: string, lead: Lead) => {
-    if (!adminId || !agentId) return;
-  
-    try {
-      switch (type) {
-        case 'call':
-          if (lead.phone) {
-            await logLeadAction(adminId, agentId, lead.id, 'call', {
-              phoneNumber: lead.phone,
-              leadName: `${lead.firstName} ${lead.lastName}`
-            });
-            window.open(`tel:${lead.phone}`, '_blank');
-          } else {
-            toast.warning('No phone number available for this lead');
-          }
-          break;
-  
-        case 'email':
-          if (lead.email) {
-            await logLeadAction(adminId, agentId, lead.id, 'email', {
-              email: lead.email,
-              leadName: `${lead.firstName} ${lead.lastName}`
-            });
-            window.open(`mailto:${lead.email}?subject=Regarding your property inquiry`, '_blank');
-          } else {
-            toast.warning('No email address available for this lead');
-          }
-          break;
-  
-        case 'whatsapp':
-          if (lead.phone) {
-            await logLeadAction(adminId, agentId, lead.id, 'whatsapp', {
-              phoneNumber: lead.phone,
-              leadName: `${lead.firstName} ${lead.lastName}`
-            });
-            const cleanedPhone = lead.phone.replace(/\D/g, '');
-            const message = `Hi ${lead.firstName}, I'm following up on your property inquiry.`;
-            window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(message)}`, '_blank');
-          } else {
-            toast.warning('No phone number available for WhatsApp');
-          }
-          break;
-  
-        case 'edit':
-          setEditingLead(lead);
-          await logViewActivity(adminId, agentId, lead);
-          break;
-  
-        case 'view':
-          setSelectedLead(lead);
-          await logViewActivity(adminId, agentId, lead);
-          break;
-  
-        case 'schedule':
-          handleSingleScheduleCall(lead);
-          break;
-  
-        default:
-          break;
-      }
-    } catch (error) {
-      console.error('Error logging activity:', error);
+  const handleAction = (type: string, lead: Lead) => {
+    switch (type) {
+      case 'call':
+        if (lead.phone) {
+          window.open(`tel:${lead.phone}`, '_blank');
+        } else {
+          toast.warning('No phone number available for this lead');
+        }
+        break;
+
+      case 'email':
+        if (lead.email) {
+          window.open(`mailto:${lead.email}?subject=Regarding your property inquiry`, '_blank');
+        } else {
+          toast.warning('No email address available for this lead');
+        }
+        break;
+
+      case 'whatsapp':
+        if (lead.phone) {
+          const cleanedPhone = lead.phone.replace(/\D/g, '');
+          const message = `Hi ${lead.firstName}, I'm following up on your property inquiry.`;
+          window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(message)}`, '_blank');
+        } else {
+          toast.warning('No phone number available for WhatsApp');
+        }
+        break;
+
+      case 'edit':
+        setEditingLead(lead);
+        break;
+
+      case 'view':
+        setSelectedLead(lead);
+        break;
+
+      case 'schedule':
+        handleSingleScheduleCall(lead);
+        break;
+
+      default:
+        break;
     }
   };
+
   // Export to Excel
   const handleExport = async () => {
     try {
@@ -686,30 +533,26 @@ const toggleSelectLead = async (leadId: string) => {
   // Import Excel Data
   const importLeadsToDatabase = async (leads: Omit<Lead, 'id'>[]) => {
     if (!adminId) throw new Error('Not authenticated');
-
+  
     const leadsRef = ref(database, `users/${adminId}/leads`);
-    const batchSize = 10; // Process in batches to avoid memory issues
+    const batchSize = 10;
     let importedCount = 0;
-
+  
     for (let i = 0; i < leads.length; i += batchSize) {
       const batch = leads.slice(i, i + batchSize);
-      const encryptedBatch = await Promise.all(
-        batch.map(async lead => ({
-          ...await encryptObject(lead),
-          createdAt: await encryptValue(new Date().toISOString()),
-          updatedAt: await encryptValue(new Date().toISOString())
-        }))
-      );
-
-      const batchPromises = encryptedBatch.map(encryptedLead => {
+      const batchPromises = batch.map(lead => {
         const newLeadRef = push(leadsRef);
-        return set(newLeadRef, encryptedLead);
+        return set(newLeadRef, {
+          ...lead,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
       });
-
+  
       await Promise.all(batchPromises);
       importedCount += batch.length;
     }
-
+  
     return importedCount;
   };
 
@@ -780,9 +623,14 @@ const toggleSelectLead = async (leadId: string) => {
     };
   };
 
-  const allStatuses = Array.from(new Set(leads.map(lead => lead.status)));
-  const allSources = Array.from(new Set(leads.map(lead => lead.source)));
-
+  const allStatuses = Array.from(
+    new Set(leads.map(lead => lead.status).filter(status => status?.trim()))
+  );
+  
+  const allSources = Array.from(
+    new Set(leads.map(lead => lead.source).filter(source => source?.trim()))
+  );
+  
   return (
     <div className="space-y-4">
       {/* Bulk Actions Bar */}
@@ -798,12 +646,13 @@ const toggleSelectLead = async (leadId: string) => {
                 <SelectValue placeholder="Change status..." />
               </SelectTrigger>
               <SelectContent>
-                {allStatuses.map(status => (
-                  <SelectItem key={status} value={status}>
-                    {status}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+  {allStatuses.map(status => (
+    <SelectItem key={status} value={status}>
+      {status}
+    </SelectItem>
+  ))}
+</SelectContent>
+
             </Select>
 
             <Button

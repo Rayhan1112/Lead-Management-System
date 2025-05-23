@@ -278,7 +278,7 @@ export const AgentCards: React.FC = () => {
           window.open(`mailto:${agent.email}`, '_blank');
           break;
         case 'whatsapp':
-          const phoneNumber = agent.phone.replace(/\D/g, '');
+          const phoneNumber = agent.phone;;
           window.open(`https://wa.me/${phoneNumber}`, '_blank');
           break;
         default:
@@ -747,7 +747,7 @@ export const AgentCards: React.FC = () => {
                             <div className="flex-1">
                               <div className="flex justify-between items-start">
                                 <p className="font-medium capitalize">
-                                  {activity.activityType.replace('_', ' ')}
+                                  {activity.activityType}
                                 </p>
                                 <p className="text-sm text-muted-foreground">
                                   {new Date(activity.timestamp).toLocaleString()}

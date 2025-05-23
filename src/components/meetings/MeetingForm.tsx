@@ -272,22 +272,19 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         ...(!isAdmin && { agentId: agentId }),
       };
   
-      // Encrypt the meeting data
-      const encryptedMeeting = await encryptObject(newMeeting);
-      console.log('Original meeting:', newMeeting);
-      console.log('Encrypted meeting:', encryptedMeeting);
+      console.log('Meeting data:', newMeeting);
   
       const updates: Record<string, any> = {};
   
       if (isAdmin) {
-        // Store encrypted meeting for admin
-        updates[`users/${adminId}/meetingdetails/${meetingId}`] = encryptedMeeting;
+        // Store meeting for admin
+        updates[`users/${adminId}/meetingdetails/${meetingId}`] = newMeeting;
   
         if (selectedAgents.length > 0) {
-          // Store encrypted meetings for each agent
+          // Store meetings for each agent
           selectedAgents.forEach(agentId => {
             const agentMeeting = {
-              ...encryptedMeeting,
+              ...newMeeting,
               isAgentMeeting: true,
               originalMeetingId: meetingId,
               agentId: agentId
@@ -305,12 +302,12 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         }
       } else {
         // Agent creating a meeting
-        updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meetingId}`] = encryptedMeeting;
+        updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meetingId}`] = newMeeting;
   
         // Create reference in admin's meetingdetails
         const adminMeetingRef = push(ref(database, `users/${adminId}/meetingdetails`));
         updates[`users/${adminId}/meetingdetails/${adminMeetingRef.key}`] = {
-          ...encryptedMeeting,
+          ...newMeeting,
           isAgentMeeting: true,
           agentId: agentId
         };
@@ -318,7 +315,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         // Share with other participants if any
         selectedAgents.filter(id => id !== agentId).forEach(participantId => {
           updates[`users/${adminId}/agents/${participantId}/meetingdetails/${meetingId}`] = {
-            ...encryptedMeeting,
+            ...newMeeting,
             isAgentMeeting: true,
             originalMeetingId: meetingId,
             agentId: agentId
@@ -329,7 +326,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
       // Save all updates
       await update(ref(database), updates);
       
-      // Schedule notification with original (unencrypted) data
+      // Schedule notification
       await scheduleNotification(newMeeting);
   
       toast.success(meeting ? 'Meeting updated successfully' : 'Meeting scheduled successfully');
