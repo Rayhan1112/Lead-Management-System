@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Edit, Trash2, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Edit, Trash2, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Undo } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -7,7 +7,7 @@ import { Task } from '@/lib/mockData';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AddTaskForm } from './AddTaskForm';
 import { database } from '../../firebase';
-import { ref, onValue, off, remove, set, update } from 'firebase/database';
+import { ref, onValue, off, remove, set, push, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 
 interface Agent {
@@ -23,6 +23,8 @@ export const TasksTable: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [backupTasks, setBackupTasks] = useState<Task[]>([]);
+  const [showBackup, setShowBackup] = useState(false);
   const isMobile = useIsMobile();
   const adminId = localStorage.getItem('adminkey');
   const agentId = localStorage.getItem('agentkey');
@@ -30,6 +32,7 @@ export const TasksTable: React.FC = () => {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const [currentBackupPage, setCurrentBackupPage] = useState(1);
   const tasksPerPage = 10;
 
   // Fetch tasks from Firebase based on user role
@@ -68,6 +71,32 @@ export const TasksTable: React.FC = () => {
     };
   }, [isAdmin, adminId, agentId]);
 
+  // Fetch backup tasks
+  useEffect(() => {
+    if (!adminId) return;
+
+    const backupRef = ref(database, `users/${adminId}/backups/tasks`);
+    
+    const fetchBackupTasks = () => {
+      onValue(backupRef, (snapshot) => {
+        const backupData: Task[] = [];
+        snapshot.forEach((childSnapshot) => {
+          backupData.push({
+            id: childSnapshot.key || '',
+            ...childSnapshot.val()
+          });
+        });
+        setBackupTasks(backupData);
+      });
+    };
+
+    fetchBackupTasks();
+
+    return () => {
+      off(backupRef);
+    };
+  }, [adminId]);
+
   // Fetch agents data (for task assignment)
   useEffect(() => {
     if (!adminId) return;
@@ -99,18 +128,48 @@ export const TasksTable: React.FC = () => {
            task.agentName.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
-  // Pagination logic
+  const filteredBackupTasks = backupTasks.filter(task => {
+    return task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+           task.agentName.toLowerCase().includes(searchTerm.toLowerCase());
+  });
+
+  // Pagination logic for main tasks
   const indexOfLastTask = currentPage * tasksPerPage;
   const indexOfFirstTask = indexOfLastTask - tasksPerPage;
   const currentTasks = filteredTasks.slice(indexOfFirstTask, indexOfLastTask);
   const totalPages = Math.ceil(filteredTasks.length / tasksPerPage);
 
+  // Pagination logic for backup tasks
+  const indexOfLastBackupTask = currentBackupPage * tasksPerPage;
+  const indexOfFirstBackupTask = indexOfLastBackupTask - tasksPerPage;
+  const currentBackupTasks = filteredBackupTasks.slice(indexOfFirstBackupTask, indexOfLastBackupTask);
+  const totalBackupPages = Math.ceil(filteredBackupTasks.length / tasksPerPage);
+
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
 
+  const handleBackupPageChange = (page: number) => {
+    setCurrentBackupPage(page);
+  };
+
   const handleDelete = async (id: string) => {
     try {
+      // First find the task to be deleted
+      const taskToDelete = tasks.find(task => task.id === id);
+      if (!taskToDelete) return;
+
+      // Add to backup before deleting
+      if (adminId) {
+        const backupRef = ref(database, `users/${adminId}/backups/tasks/${id}`);
+        await set(backupRef, {
+          ...taskToDelete,
+          deletedAt: new Date().toISOString(),
+          deletedBy: user?.email || 'unknown'
+        });
+      }
+
+      // Then delete from main tasks
       let taskRef;
       
       if (isAdmin && adminId) {
@@ -122,59 +181,82 @@ export const TasksTable: React.FC = () => {
       }
 
       await remove(taskRef);
-      toast.success('Task deleted successfully');
+      toast.success('Task moved to backup successfully');
     } catch (error) {
       console.error('Error deleting task:', error);
       toast.error('Failed to delete task');
     }
   };
 
+  const handleRestoreTask = async (task: Task) => {
+    try {
+      // First add the task back to main tasks
+      let taskRef;
+      if (isAdmin && adminId) {
+        taskRef = ref(database, `users/${adminId}/tasks/${task.id}`);
+      } else if (agentId && adminId) {
+        taskRef = ref(database, `users/${adminId}/agents/${agentId}/tasks/${task.id}`);
+      } else {
+        throw new Error('Unable to determine storage path');
+      }
 
+      // Remove the deletedAt field before restoring
+      const { deletedAt, deletedBy, ...taskToRestore } = task;
+      await set(taskRef, taskToRestore);
+      
+      // Then remove from backup
+      if (adminId) {
+        const backupRef = ref(database, `users/${adminId}/backups/tasks/${task.id}`);
+        await remove(backupRef);
+      }
 
-const handleAddTask = async (newTask: Task) => {
-  try {
-    if (!adminId) throw new Error("Missing adminId");
-
-    const updates: { [key: string]: any } = {};
-
-    if (isAdmin) {
-      if (!newTask.agentId) throw new Error("Missing agentId for task");
-
-      // Set task in agent's task path
-      updates[`users/${adminId}/agents/${newTask.agentId}/tasks/${newTask.id}`] = newTask;
-
-      // Set task in admin's general task path
-      updates[`users/${adminId}/tasks/${newTask.id}`] = newTask;
-    } else if (agentId) {
-      // Set task in agent's path
-      updates[`users/${adminId}/agents/${agentId}/tasks/${newTask.id}`] = newTask;
-
-      // Set task in admin's general task path
-      updates[`users/${adminId}/tasks/${newTask.id}`] = newTask;
-    } else {
-      throw new Error("Unable to determine storage path");
+      toast.success('Task restored successfully');
+    } catch (error) {
+      console.error('Error restoring task:', error);
+      toast.error('Failed to restore task');
     }
+  };
 
-    await update(ref(database), updates);
+  const handlePermanentDelete = async (id: string) => {
+    try {
+      if (adminId) {
+        const backupRef = ref(database, `users/${adminId}/backups/tasks/${id}`);
+        await remove(backupRef);
+        toast.success('Task permanently deleted from backup');
+      }
+    } catch (error) {
+      console.error('Error permanently deleting task:', error);
+      toast.error('Failed to permanently delete task');
+    }
+  };
 
-    setTasks(prev => [newTask, ...prev]);
-    setIsAddingTask(false);
-    toast.success("Task added successfully");
-  } catch (error) {
-    console.error("Error adding task:", error);
-    toast.error("Failed to add task");
-  }
-};
-
+  const handleAddTask = async (newTask: Task) => {
+    try {
+      let taskRef;
+      if (isAdmin && adminId) {
+        taskRef = ref(database, `users/${adminId}/tasks/${newTask.id}`);
+      } else if (agentId && adminId) {
+        taskRef = ref(database, `users/${adminId}/agents/${agentId}/tasks/${newTask.id}`);
+      } else {
+        throw new Error('Unable to determine storage path');
+      }
   
+      await set(taskRef, newTask);
+      
+      setTasks(prev => [newTask, ...prev]);
+      setIsAddingTask(false);
+      toast.success('Task added successfully');
+    } catch (error) {
+      console.error('Error adding task:', error);
+      toast.error('Failed to add task');
+    }
+  };
   
   const handleUpdateTask = async (updatedTask: Task) => {
     try {
       let taskRef;
-  
       if (isAdmin && adminId) {
-        if (!updatedTask.agentId) throw new Error("Missing agentId for task");
-        taskRef = ref(database, `users/${adminId}/agents/${updatedTask.agentId}/tasks/${updatedTask.id}`);
+        taskRef = ref(database, `users/${adminId}/tasks/${updatedTask.id}`);
       } else if (agentId && adminId) {
         taskRef = ref(database, `users/${adminId}/agents/${agentId}/tasks/${updatedTask.id}`);
       } else {
@@ -182,7 +264,7 @@ const handleAddTask = async (newTask: Task) => {
       }
   
       await set(taskRef, updatedTask);
-  
+      
       setTasks(prev => prev.map(task => 
         task.id === updatedTask.id ? updatedTask : task
       ));
@@ -194,7 +276,6 @@ const handleAddTask = async (newTask: Task) => {
       toast.error('Failed to update task');
     }
   };
-  
 
   const handleEdit = (task: Task) => {
     setSelectedTask(task);
@@ -228,7 +309,11 @@ const handleAddTask = async (newTask: Task) => {
   };
 
   // Pagination controls component
-  const PaginationControls = () => {
+  const PaginationControls = ({ currentPage, totalPages, onPageChange }: {
+    currentPage: number;
+    totalPages: number;
+    onPageChange: (page: number) => void;
+  }) => {
     const maxVisiblePages = 5;
     let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
     let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
@@ -245,13 +330,19 @@ const handleAddTask = async (newTask: Task) => {
     return (
       <div className="flex items-center justify-between px-2 py-4">
         <div className="text-sm text-muted-foreground">
-          Showing {indexOfFirstTask + 1}-{Math.min(indexOfLastTask, filteredTasks.length)} of {filteredTasks.length} tasks
+          Showing {showBackup 
+            ? (Math.min((currentBackupPage - 1) * tasksPerPage + 1, filteredBackupTasks.length)) 
+            : (Math.min((currentPage - 1) * tasksPerPage + 1, filteredTasks.length))}-{
+            showBackup 
+              ? Math.min(currentBackupPage * tasksPerPage, filteredBackupTasks.length) 
+              : Math.min(currentPage * tasksPerPage, filteredTasks.length)
+          } of {showBackup ? filteredBackupTasks.length : filteredTasks.length} tasks
         </div>
         <div className="flex items-center space-x-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handlePageChange(1)}
+            onClick={() => onPageChange(1)}
             disabled={currentPage === 1}
             className="hidden sm:flex"
           >
@@ -260,7 +351,7 @@ const handleAddTask = async (newTask: Task) => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handlePageChange(currentPage - 1)}
+            onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage === 1}
           >
             <ChevronLeft className="h-4 w-4" />
@@ -271,7 +362,7 @@ const handleAddTask = async (newTask: Task) => {
               <Button
                 variant={currentPage === 1 ? "default" : "outline"}
                 size="sm"
-                onClick={() => handlePageChange(1)}
+                onClick={() => onPageChange(1)}
               >
                 1
               </Button>
@@ -284,7 +375,7 @@ const handleAddTask = async (newTask: Task) => {
               key={page}
               variant={currentPage === page ? "default" : "outline"}
               size="sm"
-              onClick={() => handlePageChange(page)}
+              onClick={() => onPageChange(page)}
             >
               {page}
             </Button>
@@ -296,7 +387,7 @@ const handleAddTask = async (newTask: Task) => {
               <Button
                 variant={currentPage === totalPages ? "default" : "outline"}
                 size="sm"
-                onClick={() => handlePageChange(totalPages)}
+                onClick={() => onPageChange(totalPages)}
               >
                 {totalPages}
               </Button>
@@ -306,7 +397,7 @@ const handleAddTask = async (newTask: Task) => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handlePageChange(currentPage + 1)}
+            onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage === totalPages || totalPages === 0}
           >
             <ChevronRight className="h-4 w-4" />
@@ -314,7 +405,7 @@ const handleAddTask = async (newTask: Task) => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handlePageChange(totalPages)}
+            onClick={() => onPageChange(totalPages)}
             disabled={currentPage === totalPages || totalPages === 0}
             className="hidden sm:flex"
           >
@@ -328,7 +419,7 @@ const handleAddTask = async (newTask: Task) => {
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
-        <h2 className="text-xl font-semibold">Tasks</h2>
+        <h2 className="text-xl font-semibold">{showBackup ? 'Deleted Tasks Backup' : 'Tasks'}</h2>
         <Input
           placeholder="Search tasks..."
           className="neuro-inset focus:shadow-none w-full sm:w-[300px]"
@@ -337,134 +428,269 @@ const handleAddTask = async (newTask: Task) => {
         />
       </div>
 
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-between mb-4">
         <Button 
-          onClick={() => {
-            setSelectedTask(null);
-            setIsAddingTask(true);
-          }}
+          variant={showBackup ? "outline" : "default"}
+          onClick={() => setShowBackup(!showBackup)}
           className="neuro hover:shadow-none transition-all duration-300"
         >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Task
+          {showBackup ? (
+            <>
+              <ChevronLeft className="h-4 w-4 mr-2" />
+              Back to Tasks
+            </>
+          ) : (
+            <>
+              <Undo className="h-4 w-4 mr-2" />
+              View Deleted Tasks
+            </>
+          )}
         </Button>
+        
+        {!showBackup && (
+          <Button 
+            onClick={() => {
+              setSelectedTask(null);
+              setIsAddingTask(true);
+            }}
+            className="neuro hover:shadow-none transition-all duration-300"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Task
+          </Button>
+        )}
       </div>
 
-      {/* Tasks Table - Desktop */}
-      <div className="overflow-auto neuro hidden sm:block">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-muted/50">
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Task</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Assigned To</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Start Date</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">End Date</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Priority</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Status</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {currentTasks.map((task) => (
-              <tr key={task.id} className="hover:bg-muted/20">
-                <td className="p-3">
+      {showBackup ? (
+        <>
+          {/* Backup Tasks Table - Desktop */}
+          <div className="overflow-auto neuro hidden sm:block">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-muted/50">
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Task</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Assigned To</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Deleted At</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Deleted By</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {currentBackupTasks.map((task) => (
+                  <tr key={task.id} className="hover:bg-muted/20">
+                    <td className="p-3">
+                      <div>
+                        <p className="font-medium">{task.title}</p>
+                        <p className="text-sm text-muted-foreground truncate max-w-[250px]">
+                          {task.description}
+                        </p>
+                      </div>
+                    </td>
+                    <td className="p-3">{task.agentName}</td>
+                    <td className="p-3">{new Date(task.deletedAt || '').toLocaleString()}</td>
+                    <td className="p-3">{task.deletedBy || 'Unknown'}</td>
+                    <td className="p-3">
+                      <div className="flex space-x-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 text-green-500 hover:text-green-600"
+                          onClick={() => handleRestoreTask(task)}
+                        >
+                          <Undo className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:text-red-600"
+                          onClick={() => handlePermanentDelete(task.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <PaginationControls 
+              currentPage={currentBackupPage} 
+              totalPages={totalBackupPages} 
+              onPageChange={handleBackupPageChange} 
+            />
+          </div>
+
+          {/* Backup Tasks Cards - Mobile */}
+          <div className="sm:hidden space-y-4">
+            {currentBackupTasks.map((task) => (
+              <div key={task.id} className="neuro p-4 rounded-lg">
+                <div className="flex justify-between items-start">
                   <div>
-                    <p className="font-medium">{task.title}</p>
-                    <p className="text-sm text-muted-foreground truncate max-w-[250px]">
-                      {task.description}
-                    </p>
+                    <h3 className="font-medium">{task.title}</h3>
+                    <p className="text-sm text-muted-foreground">{task.description}</p>
                   </div>
-                </td>
-                <td className="p-3">{task.agentName}</td>
-                <td className="p-3">{task.startDate}</td>
-                <td className="p-3">{task.endDate}</td>
-                <td className="p-3">
+                </div>
+                
+                <div className="mt-3 flex flex-col space-y-2">
+                  <div className="text-sm">Assigned to: <span className="font-medium">{task.agentName}</span></div>
+                  <div className="text-sm">Deleted at: <span className="font-medium">{new Date(task.deletedAt || '').toLocaleString()}</span></div>
+                  <div className="text-sm">Deleted by: <span className="font-medium">{task.deletedBy || 'Unknown'}</span></div>
+                </div>
+                
+                <div className="mt-3 pt-3 border-t flex justify-end gap-2">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-8 w-8 text-green-500 hover:text-green-600"
+                    onClick={() => handleRestoreTask(task)}
+                  >
+                    <Undo className="h-4 w-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-8 w-8 text-red-500 hover:text-red-600"
+                    onClick={() => handlePermanentDelete(task.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <PaginationControls 
+              currentPage={currentBackupPage} 
+              totalPages={totalBackupPages} 
+              onPageChange={handleBackupPageChange} 
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Tasks Table - Desktop */}
+          <div className="overflow-auto neuro hidden sm:block">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-muted/50">
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Task</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Assigned To</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Start Date</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">End Date</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Priority</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Status</th>
+                  <th className="text-left p-3 text-sm font-medium text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {currentTasks.map((task) => (
+                  <tr key={task.id} className="hover:bg-muted/20">
+                    <td className="p-3">
+                      <div>
+                        <p className="font-medium">{task.title}</p>
+                        <p className="text-sm text-muted-foreground truncate max-w-[250px]">
+                          {task.description}
+                        </p>
+                      </div>
+                    </td>
+                    <td className="p-3">{task.agentName}</td>
+                    <td className="p-3">{task.startDate}</td>
+                    <td className="p-3">{task.endDate}</td>
+                    <td className="p-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityClassName(task.priority)}`}>
+                        {task.priority}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClassName(task.status)}`}>
+                        {task.status.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <div className="flex space-x-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleEdit(task)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:text-red-600"
+                          onClick={() => handleDelete(task.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <PaginationControls 
+              currentPage={currentPage} 
+              totalPages={totalPages} 
+              onPageChange={handlePageChange} 
+            />
+          </div>
+
+          {/* Tasks Cards - Mobile */}
+          <div className="sm:hidden space-y-4">
+            {currentTasks.map((task) => (
+              <div key={task.id} className="neuro p-4 rounded-lg">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-medium">{task.title}</h3>
+                    <p className="text-sm text-muted-foreground">{task.description}</p>
+                  </div>
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityClassName(task.priority)}`}>
                     {task.priority}
                   </span>
-                </td>
-                <td className="p-3">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClassName(task.status)}`}>
-                    {task.status.replace('_', ' ')}
-                  </span>
-                </td>
-                <td className="p-3">
-                  <div className="flex space-x-1">
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                      onClick={() => handleEdit(task)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="h-8 w-8 text-red-500 hover:text-red-600"
-                      onClick={() => handleDelete(task.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                </div>
+                
+                <div className="mt-3 flex flex-col space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm">Assigned to: <span className="font-medium">{task.agentName}</span></div>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClassName(task.status)}`}>
+                      {task.status.replace('_', ' ')}
+                    </span>
                   </div>
-                </td>
-              </tr>
+                  
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <div>Start: {task.startDate}</div>
+                    <div>End: {task.endDate}</div>
+                  </div>
+                </div>
+                
+                <div className="mt-3 pt-3 border-t flex justify-end gap-2">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    onClick={() => handleEdit(task)}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-8 w-8 text-red-500 hover:text-red-600"
+                    onClick={() => handleDelete(task.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
-        <PaginationControls />
-      </div>
-
-      {/* Tasks Cards - Mobile */}
-      <div className="sm:hidden space-y-4">
-        {currentTasks.map((task) => (
-          <div key={task.id} className="neuro p-4 rounded-lg">
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="font-medium">{task.title}</h3>
-                <p className="text-sm text-muted-foreground">{task.description}</p>
-              </div>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityClassName(task.priority)}`}>
-                {task.priority}
-              </span>
-            </div>
-            
-            <div className="mt-3 flex flex-col space-y-2">
-              <div className="flex justify-between items-center">
-                <div className="text-sm">Assigned to: <span className="font-medium">{task.agentName}</span></div>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusClassName(task.status)}`}>
-                  {task.status.replace('_', ' ')}
-                </span>
-              </div>
-              
-              <div className="flex justify-between text-sm text-muted-foreground">
-                <div>Start: {task.startDate}</div>
-                <div>End: {task.endDate}</div>
-              </div>
-            </div>
-            
-            <div className="mt-3 pt-3 border-t flex justify-end gap-2">
-              <Button 
-                variant="ghost" 
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                onClick={() => handleEdit(task)}
-              >
-                <Edit className="h-4 w-4" />
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon"
-                className="h-8 w-8 text-red-500 hover:text-red-600"
-                onClick={() => handleDelete(task.id)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
+            <PaginationControls 
+              currentPage={currentPage} 
+              totalPages={totalPages} 
+              onPageChange={handlePageChange} 
+            />
           </div>
-        ))}
-        <PaginationControls />
-      </div>
+        </>
+      )}
 
       {/* Task Form */}
       <AddTaskForm
