@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,12 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/context/AuthContext';
 import { database, messaging } from '../../firebase';
-import { ref, push, set, get, update } from 'firebase/database';
+import { ref, push, set, get, update, query, orderByChild, equalTo } from 'firebase/database';
 import { getToken, onMessage } from 'firebase/messaging';
 import { toast } from 'sonner';
-import { format, parseISO, subMinutes } from 'date-fns';
+import { format, parseISO, subMinutes, addMinutes, isBefore, isAfter, addDays, addWeeks, addMonths } from 'date-fns';
 import { encryptObject, decryptObject } from '../../lib/utils';
-
 
 interface Meeting {
   id: string;
@@ -28,6 +27,11 @@ interface Meeting {
   isAgentMeeting?: boolean;
   originalMeetingId?: string;
   notificationId?: string;
+  isRecurring?: boolean;
+  recurrencePattern?: 'daily' | 'weekly' | 'monthly';
+  recurrenceEndDate?: string;
+  followUp?: boolean;
+  parentMeetingId?: string;
 }
 
 interface MeetingFormProps {
@@ -50,6 +54,10 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
     participants: [],
     reminder: '15min',
     status: 'scheduled',
+    isRecurring: false,
+    recurrencePattern: 'weekly',
+    recurrenceEndDate: '',
+    followUp: false
   });
   
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
@@ -57,6 +65,9 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
   const [isLoading, setIsLoading] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [conflicts, setConflicts] = useState<{agentId: string, conflicts: Meeting[]}[]>([]);
+  const [suggestedTimes, setSuggestedTimes] = useState<string[]>([]);
+  const [agentAvailabilities, setAgentAvailabilities] = useState<Record<string, {start: string, end: string}>>({});
 
   useEffect(() => {
     if (meeting) {
@@ -68,17 +79,30 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         participants: meeting.participants || [],
         reminder: meeting.reminder,
         status: meeting.status,
+        isRecurring: meeting.isRecurring || false,
+        recurrencePattern: meeting.recurrencePattern || 'weekly',
+        recurrenceEndDate: meeting.recurrenceEndDate || '',
+        followUp: meeting.followUp || false,
+        parentMeetingId: meeting.parentMeetingId
       });
       setSelectedAgents(meeting.participants || []);
     } else {
+      const today = new Date().toISOString().split('T')[0];
+      const defaultTime = new Date();
+      defaultTime.setHours(10, 0, 0, 0); // Default to 10:00 AM
+      
       setFormData({
         title: '',
-        startDate: new Date().toISOString().split('T')[0],
-        startTime: '',
+        startDate: today,
+        startTime: format(defaultTime, 'HH:mm'),
         duration: 30,
         participants: [],
         reminder: '15min',
         status: 'scheduled',
+        isRecurring: false,
+        recurrencePattern: 'weekly',
+        recurrenceEndDate: '',
+        followUp: false
       });
       setSelectedAgents([]);
     }
@@ -148,6 +172,20 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         });
         setAvailableAgents(agentsData.filter(agent => agent.status === 'active'));
         
+        // Fetch default working hours for each agent
+        const availabilities: Record<string, {start: string, end: string}> = {};
+        for (const agent of agentsData) {
+          const availabilityRef = ref(database, `users/${adminId}/agents/${agent.id}/availability`);
+          const availabilitySnapshot = await get(availabilityRef);
+          if (availabilitySnapshot.exists()) {
+            availabilities[agent.id] = availabilitySnapshot.val();
+          } else {
+            // Default working hours (9am-5pm)
+            availabilities[agent.id] = { start: '09:00', end: '17:00' };
+          }
+        }
+        setAgentAvailabilities(availabilities);
+        
         if (!meeting && !isAdmin && agentId) {
           setSelectedAgents([agentId]);
         }
@@ -160,6 +198,113 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Check for scheduling conflicts when time or participants change
+  useEffect(() => {
+    if (formData.startDate && formData.startTime && formData.duration && selectedAgents.length > 0) {
+      checkConflicts();
+    }
+  }, [formData.startDate, formData.startTime, formData.duration, selectedAgents]);
+
+  const checkConflicts = useCallback(async () => {
+    if (!adminId || !formData.startDate || !formData.startTime || !formData.duration) return;
+
+    const meetingStart = parseISO(`${formData.startDate}T${formData.startTime}`);
+    const meetingEnd = addMinutes(meetingStart, formData.duration);
+    
+    const conflictResults: {agentId: string, conflicts: Meeting[]}[] = [];
+    
+    for (const agentId of selectedAgents) {
+      try {
+        const meetingsRef = ref(database, `users/${adminId}/agents/${agentId}/meetingdetails`);
+        const snapshot = await get(meetingsRef);
+        
+        const agentConflicts: Meeting[] = [];
+        
+        if (snapshot.exists()) {
+          snapshot.forEach((childSnapshot) => {
+            const meetingData = childSnapshot.val();
+            if (meetingData.id === formData.id) return; // Skip current meeting if editing
+            
+            const existingStart = parseISO(`${meetingData.startDate}T${meetingData.startTime}`);
+            const existingEnd = addMinutes(existingStart, meetingData.duration);
+            
+            // Check if time ranges overlap
+            if (
+              (isBefore(meetingStart, existingEnd) && isAfter(meetingStart, existingStart)) ||
+              (isBefore(meetingEnd, existingEnd) && isAfter(meetingEnd, existingStart)) ||
+              (isBefore(existingStart, meetingEnd) && isAfter(existingStart, meetingStart)) ||
+              (isBefore(existingEnd, meetingEnd) && isAfter(existingEnd, meetingStart))
+            ) {
+              agentConflicts.push(meetingData);
+            }
+          });
+        }
+        
+        if (agentConflicts.length > 0) {
+          conflictResults.push({agentId, conflicts: agentConflicts});
+        }
+      } catch (error) {
+        console.error(`Error checking conflicts for agent ${agentId}:`, error);
+      }
+    }
+    
+    setConflicts(conflictResults);
+    
+    // If conflicts found, suggest alternative times
+    if (conflictResults.length > 0) {
+      suggestAlternativeTimes();
+    }
+  }, [formData, selectedAgents, adminId]);
+
+  const suggestAlternativeTimes = useCallback(() => {
+    if (!formData.startDate || !formData.startTime || !formData.duration) return;
+
+    const originalTime = parseISO(`${formData.startDate}T${formData.startTime}`);
+    const suggestions: string[] = [];
+    
+    // Suggest times at 30-minute intervals around the original time
+    for (let i = 1; i <= 3; i++) {
+      // Earlier times
+      const earlierTime = subMinutes(originalTime, i * 30);
+      if (isWithinWorkingHours(earlierTime)) {
+        suggestions.push(format(earlierTime, 'HH:mm'));
+      }
+      
+      // Later times
+      const laterTime = addMinutes(originalTime, i * 30);
+      if (isWithinWorkingHours(laterTime)) {
+        suggestions.push(format(laterTime, 'HH:mm'));
+      }
+    }
+    
+    setSuggestedTimes(suggestions);
+  }, [formData, selectedAgents, agentAvailabilities]);
+
+  const isWithinWorkingHours = (time: Date) => {
+    if (selectedAgents.length === 0) return true;
+    
+    // Check if time is within working hours for all selected agents
+    return selectedAgents.every(agentId => {
+      const availability = agentAvailabilities[agentId];
+      if (!availability) return true;
+      
+      const startHour = parseInt(availability.start.split(':')[0]);
+      const startMinute = parseInt(availability.start.split(':')[1]);
+      const endHour = parseInt(availability.end.split(':')[0]);
+      const endMinute = parseInt(availability.end.split(':')[1]);
+      
+      const timeHour = time.getHours();
+      const timeMinute = time.getMinutes();
+      
+      // Convert to minutes since midnight for easier comparison
+      const startMinutes = startHour * 60 + startMinute;
+      const endMinutes = endHour * 60 + endMinute;
+      const timeMinutes = timeHour * 60 + timeMinute;
+      
+      return timeMinutes >= startMinutes && timeMinutes <= endMinutes;
+    });
   };
 
   const showLocalNotification = (title: string, body: string) => {
@@ -242,6 +387,60 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
     });
   };
 
+  const handleTimeSuggestionClick = (time: string) => {
+    setFormData(prev => ({
+      ...prev,
+      startTime: time
+    }));
+    setSuggestedTimes([]);
+  };
+
+  const createRecurringMeetings = async (baseMeeting: Meeting) => {
+    if (!formData.isRecurring || !formData.recurrencePattern || !formData.recurrenceEndDate) {
+      return [];
+    }
+
+    const recurringMeetings: Meeting[] = [];
+    const baseDate = parseISO(`${baseMeeting.startDate}T${baseMeeting.startTime}`);
+    const endDate = parseISO(formData.recurrenceEndDate);
+    
+    let currentDate = baseDate;
+    let iteration = 1;
+
+    while (currentDate <= endDate) {
+      iteration++;
+      
+      // Calculate next occurrence based on pattern
+      switch (formData.recurrencePattern) {
+        case 'daily':
+          currentDate = addDays(currentDate, 1);
+          break;
+        case 'weekly':
+          currentDate = addWeeks(currentDate, 1);
+          break;
+        case 'monthly':
+          currentDate = addMonths(currentDate, 1);
+          break;
+      }
+      
+      if (currentDate > endDate) break;
+      
+      const recurringMeeting: Meeting = {
+        ...baseMeeting,
+        id: `${baseMeeting.id}-recur-${iteration}`,
+        startDate: format(currentDate, 'yyyy-MM-dd'),
+        startTime: format(currentDate, 'HH:mm'),
+        originalMeetingId: baseMeeting.id,
+        isRecurring: true,
+        recurrencePattern: formData.recurrencePattern,
+        recurrenceEndDate: formData.recurrenceEndDate
+      };
+      
+      recurringMeetings.push(recurringMeeting);
+    }
+
+    return recurringMeetings;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,12 +466,14 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         status: formData.status || 'scheduled',
         createdBy: user.id,
         createdAt: new Date().toISOString(),
+        isRecurring: formData.isRecurring || false,
+        recurrencePattern: formData.recurrencePattern,
+        recurrenceEndDate: formData.recurrenceEndDate,
+        followUp: formData.followUp || false,
         ...(meeting?.isAgentMeeting && { isAgentMeeting: true }),
         ...(meeting?.originalMeetingId && { originalMeetingId: meeting.originalMeetingId }),
         ...(!isAdmin && { agentId: agentId }),
       };
-  
-      console.log('Meeting data:', newMeeting);
   
       const updates: Record<string, any> = {};
   
@@ -287,7 +488,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
               ...newMeeting,
               isAgentMeeting: true,
               originalMeetingId: meetingId,
-              agentId: agentId
+              agentId: agentId,
             };
             updates[`users/${adminId}/agents/${agentId}/meetingdetails/${meetingId}`] = agentMeeting;
           });
@@ -323,11 +524,35 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
         });
       }
   
+      // Create recurring meetings if enabled
+      if (formData.isRecurring && formData.recurrencePattern && formData.recurrenceEndDate) {
+        const recurringMeetings = await createRecurringMeetings(newMeeting);
+        
+        for (const recurringMeeting of recurringMeetings) {
+          updates[`users/${adminId}/meetingdetails/${recurringMeeting.id}`] = recurringMeeting;
+          
+          selectedAgents.forEach(agentId => {
+            updates[`users/${adminId}/agents/${agentId}/meetingdetails/${recurringMeeting.id}`] = {
+              ...recurringMeeting,
+              isAgentMeeting: true,
+              agentId: agentId
+            };
+          });
+        }
+      }
+  
       // Save all updates
       await update(ref(database), updates);
       
       // Schedule notification
       await scheduleNotification(newMeeting);
+  
+      // If this is a follow-up meeting, update the original meeting
+      if (formData.followUp && meeting?.id) {
+        await update(ref(database, `users/${adminId}/meetingdetails/${meeting.id}`), {
+          followUpMeetingId: meetingId
+        });
+      }
   
       toast.success(meeting ? 'Meeting updated successfully' : 'Meeting scheduled successfully');
       onSubmit();
@@ -339,6 +564,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
       setIsLoading(false);
     }
   };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[500px] neuro border-none max-h-[90vh] overflow-y-auto">
@@ -369,6 +595,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
                 className="neuro-inset focus:shadow-none"
                 value={formData.startDate}
                 onChange={handleChange}
+                min={new Date().toISOString().split('T')[0]}
                 required
               />
             </div>
@@ -384,6 +611,19 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
                 onChange={handleChange}
                 required
               />
+              {suggestedTimes.length > 0 && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  Suggested times: {suggestedTimes.map(time => (
+                    <span 
+                      key={time} 
+                      className="cursor-pointer text-blue-500 hover:underline mr-2"
+                      onClick={() => handleTimeSuggestionClick(time)}
+                    >
+                      {time}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           
@@ -443,6 +683,71 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
             </Select>
           </div>
           
+          {/* Recurring meeting options */}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="isRecurring"
+                checked={formData.isRecurring || false}
+                onCheckedChange={(checked) => setFormData({...formData, isRecurring: Boolean(checked)})}
+              />
+              <label htmlFor="isRecurring" className="text-sm font-medium leading-none">
+                Recurring Meeting
+              </label>
+            </div>
+            
+            {formData.isRecurring && (
+              <div className="pl-6 space-y-2">
+                <div className="space-y-2">
+                  <Label htmlFor="recurrencePattern">Recurrence Pattern</Label>
+                  <Select 
+                    value={formData.recurrencePattern || 'weekly'}
+                    onValueChange={(value) => handleSelectChange('recurrencePattern', value)}
+                  >
+                    <SelectTrigger className="neuro-inset focus:shadow-none">
+                      <SelectValue placeholder="Select pattern" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="recurrenceEndDate">End Date</Label>
+                  <Input
+                    id="recurrenceEndDate"
+                    name="recurrenceEndDate"
+                    type="date"
+                    className="neuro-inset focus:shadow-none"
+                    value={formData.recurrenceEndDate || ''}
+                    onChange={handleChange}
+                    min={formData.startDate}
+                    required={formData.isRecurring}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Follow-up meeting option */}
+          {meeting && !meeting.followUp && (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="followUp"
+                  checked={formData.followUp || false}
+                  onCheckedChange={(checked) => setFormData({...formData, followUp: Boolean(checked)})}
+                />
+                <label htmlFor="followUp" className="text-sm font-medium leading-none">
+                  Schedule as Follow-up Meeting
+                </label>
+              </div>
+            </div>
+          )}
+          
           {(isAdmin || agentId) && (
             <div className="space-y-2">
               <Label htmlFor="participants">Participants</Label>
@@ -496,6 +801,30 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
                   }).filter(Boolean).join(', ')}
                 </div>
               )}
+            </div>
+          )}
+          
+          {/* Show scheduling conflicts if any */}
+          {conflicts.length > 0 && (
+            <div className="p-3 bg-yellow-100 border border-yellow-300 rounded-md">
+              <h4 className="font-medium text-yellow-800">Scheduling Conflicts Detected</h4>
+              <ul className="mt-2 text-sm text-yellow-700">
+                {conflicts.map(({agentId, conflicts}) => {
+                  const agent = availableAgents.find(a => a.id === agentId);
+                  return (
+                    <li key={agentId}>
+                      {agent?.firstName} {agent?.lastName} has conflicts:
+                      <ul className="ml-4 list-disc">
+                        {conflicts.map(conflict => (
+                          <li key={conflict.id}>
+                            {conflict.title} at {conflict.startTime} ({conflict.duration} mins)
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
           

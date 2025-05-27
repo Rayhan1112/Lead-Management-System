@@ -1,20 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { Edit, Trash2, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Undo } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Edit, Trash2, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Undo, Clock, CheckCircle, AlertCircle, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { Task } from '@/lib/mockData';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AddTaskForm } from './AddTaskForm';
 import { database } from '../../firebase';
-import { ref, onValue, off, remove, set, push, update } from 'firebase/database';
+import { ref, onValue, off, remove, set, push, update, query, orderByChild, endAt, get } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
+import { format, parseISO, isBefore, isAfter, addDays, differenceInDays } from 'date-fns';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
 
 interface Agent {
   id: string;
   name: string;
   email: string;
   status: string;
+  taskCount?: number;
+  lastAssigned?: string;
 }
 
 export const TasksTable: React.FC = () => {
@@ -25,10 +38,20 @@ export const TasksTable: React.FC = () => {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [backupTasks, setBackupTasks] = useState<Task[]>([]);
   const [showBackup, setShowBackup] = useState(false);
+  const [showAutomationSettings, setShowAutomationSettings] = useState(false);
   const isMobile = useIsMobile();
   const adminId = localStorage.getItem('adminkey');
   const agentId = localStorage.getItem('agentkey');
   const { user, isAdmin } = useAuth();
+
+  // Automation settings state
+  const [automationSettings, setAutomationSettings] = useState({
+    autoCleanupDays: 30,
+    autoStatusUpdate: true,
+    autoAssignTasks: true,
+    notifyOverdue: true,
+    notifyDueSoon: true
+  });
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -57,8 +80,7 @@ export const TasksTable: React.FC = () => {
           });
         });
         setTasks(tasksData);
-        // Reset to first page when tasks change
-        setCurrentPage(1);
+        setCurrentPage(1); // Reset to first page when tasks change
       });
     };
 
@@ -112,7 +134,21 @@ export const TasksTable: React.FC = () => {
             ...childSnapshot.val()
           });
         });
-        setAgents(agentsData);
+        
+        // Fetch task counts for each agent
+        Promise.all(agentsData.map(async agent => {
+          const tasksRef = ref(database, `users/${adminId}/agents/${agent.id}/tasks`);
+          const tasksSnapshot = await get(query(tasksRef, orderByChild('status'), endAt('in_progress')));
+          const taskCount = tasksSnapshot.exists() ? tasksSnapshot.size : 0;
+          
+          return {
+            ...agent,
+            taskCount,
+            lastAssigned: agent.lastAssigned || ''
+          };
+        })).then(updatedAgents => {
+          setAgents(updatedAgents);
+        });
       });
     };
 
@@ -123,21 +159,246 @@ export const TasksTable: React.FC = () => {
     };
   }, [adminId]);
 
+  // Load automation settings from localStorage
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('taskAutomationSettings');
+    if (savedSettings) {
+      setAutomationSettings(JSON.parse(savedSettings));
+    }
+  }, []);
+
+  // Save automation settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('taskAutomationSettings', JSON.stringify(automationSettings));
+  }, [automationSettings]);
+
+  // Automatically clean up old completed tasks
+  useEffect(() => {
+    if (!adminId || !isAdmin) return;
+
+    const cleanupOldTasks = async () => {
+      try {
+        const now = new Date();
+        const cutoffDate = format(addDays(now, -automationSettings.autoCleanupDays), 'yyyy-MM-dd');
+        
+        const tasksRef = ref(database, `users/${adminId}/tasks`);
+        const snapshot = await get(query(tasksRef, orderByChild('endDate'), endAt(cutoffDate)));
+        
+        if (snapshot.exists()) {
+          const updates: Record<string, any> = {};
+          const tasksToDelete: Task[] = [];
+          
+          snapshot.forEach(childSnapshot => {
+            const task = childSnapshot.val();
+            // Only clean up completed tasks that are past the cutoff date
+            if (task.status === 'completed' && isBefore(parseISO(task.endDate), parseISO(cutoffDate))) {
+              updates[`users/${adminId}/tasks/${childSnapshot.key}`] = null;
+              updates[`users/${adminId}/backups/tasks/${childSnapshot.key}`] = {
+                ...task,
+                deletedAt: new Date().toISOString(),
+                deletedBy: 'system (auto-cleanup)'
+              };
+              tasksToDelete.push(task);
+            }
+          });
+          
+          if (Object.keys(updates).length > 0) {
+            await update(ref(database), updates);
+            console.log(`Automatically cleaned up ${tasksToDelete.length} old tasks`);
+            
+          }
+        }
+      } catch (error) {
+        console.error('Error during automatic task cleanup:', error);
+      }
+    };
+
+    // Run cleanup once per day
+    const cleanupInterval = setInterval(cleanupOldTasks, 24 * 60 * 60 * 1000);
+    
+    // Initial cleanup
+    cleanupOldTasks();
+    
+    return () => clearInterval(cleanupInterval);
+  }, [adminId, isAdmin, automationSettings.autoCleanupDays]);
+
+  // Automatically update task statuses based on dates
+  useEffect(() => {
+    if (!automationSettings.autoStatusUpdate || !adminId) return;
+
+    const updateTaskStatuses = async () => {
+      try {
+        const now = new Date();
+        const today = format(now, 'yyyy-MM-dd');
+        
+        const tasksRef = ref(database, `users/${adminId}/tasks`);
+        const snapshot = await get(tasksRef);
+    
+        
+        if (snapshot.exists()) {
+          const updates: Record<string, any> = {};
+          
+          snapshot.forEach(childSnapshot => {
+            const task = childSnapshot.val();
+            const taskId = childSnapshot.key;
+            
+            // Skip if task is already completed or cancelled
+            if (task.status === 'completed' || task.status === 'cancelled') return;
+            
+            // Update overdue tasks
+            if (isBefore(parseISO(task.endDate), now) && task.status !== 'overdue') {
+              updates[`users/${adminId}/tasks/${taskId}/status`] = 'overdue';
+              
+              // Add notification if enabled
+              if (automationSettings.notifyOverdue) {
+                updates[`users/${adminId}/notifications/${taskId}_overdue`] = {
+                  type: 'task-overdue',
+                  taskId,
+                  title: `Task Overdue: ${task.title}`,
+                  message: `The task "${task.title}" is now overdue`,
+                  timestamp: new Date().toISOString(),
+                  read: false
+                };
+              }
+            }
+            
+            // Update tasks that should be in progress today
+            if (task.startDate === today && task.status === 'pending') {
+              updates[`users/${adminId}/tasks/${taskId}/status`] = 'in_progress';
+            }
+            
+            // Notify for tasks due soon (within 1 day)
+            if (automationSettings.notifyDueSoon && 
+                differenceInDays(parseISO(task.endDate), now) <= 1 && 
+                task.status === 'in_progress') {
+              updates[`users/${adminId}/notifications/${taskId}_due_soon`] = {
+                type: 'task-due-soon',
+                taskId,
+                title: `Task Due Soon: ${task.title}`,
+                message: `The task "${task.title}" is due soon`,
+                timestamp: new Date().toISOString(),
+                read: false
+              };
+            }
+          });
+          
+          if (Object.keys(updates).length > 0) {
+            await update(ref(database), updates);
+          }
+        }
+      } catch (error) {
+        console.error('Error during automatic status update:', error);
+      }
+    };
+
+    // Run status updates every hour
+    const statusUpdateInterval = setInterval(updateTaskStatuses, 60 * 60 * 1000);
+    
+    // Initial update
+    updateTaskStatuses();
+    
+    return () => clearInterval(statusUpdateInterval);
+  }, [adminId, automationSettings]);
+
+  // Get the least busy agent for auto-assignment
+  const getLeastBusyAgent = useCallback(() => {
+    if (agents.length === 0) return null;
+    
+    // Filter active agents
+    const activeAgents = agents.filter(agent => agent.status === 'active');
+    if (activeAgents.length === 0) return null;
+    
+    // Find agent with fewest assigned tasks
+    let leastBusyAgent = activeAgents[0];
+    for (const agent of activeAgents) {
+      if ((agent.taskCount || 0) < (leastBusyAgent.taskCount || 0)) {
+        leastBusyAgent = agent;
+      } else if ((agent.taskCount || 0) === (leastBusyAgent.taskCount || 0)) {
+        // If same task count, pick the one who was assigned last longer ago
+        const lastAssignedA = agent.lastAssigned ? new Date(agent.lastAssigned) : new Date(0);
+        const lastAssignedB = leastBusyAgent.lastAssigned ? new Date(leastBusyAgent.lastAssigned) : new Date(0);
+        if (lastAssignedA < lastAssignedB) {
+          leastBusyAgent = agent;
+        }
+      }
+    }
+    
+    return leastBusyAgent;
+  }, [agents]);
+
+  // Auto-assign task to least busy agent
+  const autoAssignTask = useCallback(async (taskId: string) => {
+    if (!automationSettings.autoAssignTasks || !adminId) return;
+    
+    const leastBusyAgent = getLeastBusyAgent();
+    if (!leastBusyAgent) return;
+    
+    try {
+      // Update the task assignment
+      await update(ref(database, `users/${adminId}/tasks/${taskId}`), {
+        agentId: leastBusyAgent.id,
+        agentName: leastBusyAgent.name,
+        assignedAt: new Date().toISOString()
+      });
+      
+      // Update agent's last assigned time
+      await update(ref(database, `users/${adminId}/agents/${leastBusyAgent.id}`), {
+        lastAssigned: new Date().toISOString()
+      });
+      
+      console.log(`Automatically assigned task ${taskId} to agent ${leastBusyAgent.name}`);
+    } catch (error) {
+      console.error('Error during auto-assignment:', error);
+    }
+  }, [adminId, automationSettings.autoAssignTasks, getLeastBusyAgent]);
+
+  // Filter tasks based on search term
   const filteredTasks = tasks.filter(task => {
     return task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-           task.agentName.toLowerCase().includes(searchTerm.toLowerCase());
+           (task.agentName && task.agentName.toLowerCase().includes(searchTerm.toLowerCase()));
   });
 
   const filteredBackupTasks = backupTasks.filter(task => {
     return task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-           task.agentName.toLowerCase().includes(searchTerm.toLowerCase());
+           (task.agentName && task.agentName.toLowerCase().includes(searchTerm.toLowerCase()));
+  });
+
+  // Calculate task statistics
+  const taskStats = {
+    total: tasks.length,
+    completed: tasks.filter(t => t.status === 'completed').length,
+    inProgress: tasks.filter(t => t.status === 'in_progress').length,
+    overdue: tasks.filter(t => t.status === 'overdue').length,
+    pending: tasks.filter(t => t.status === 'pending').length
+  };
+
+  // Get task urgency (for sorting/display)
+  const getTaskUrgency = (task: Task) => {
+    if (task.status === 'overdue') return 0; // Highest priority
+    if (task.status === 'in_progress') return 1;
+    
+    const daysUntilDue = differenceInDays(parseISO(task.endDate), new Date());
+    if (daysUntilDue <= 1) return 2; // Due today or tomorrow
+    if (daysUntilDue <= 3) return 3; // Due in next 3 days
+    return 4; // Not urgent
+  };
+
+  // Sort tasks by urgency (overdue first, then soonest due dates)
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
+    const urgencyA = getTaskUrgency(a);
+    const urgencyB = getTaskUrgency(b);
+    
+    if (urgencyA !== urgencyB) return urgencyA - urgencyB;
+    
+    // If same urgency, sort by due date
+    return isBefore(parseISO(a.endDate), parseISO(b.endDate)) ? -1 : 1;
   });
 
   // Pagination logic for main tasks
   const indexOfLastTask = currentPage * tasksPerPage;
   const indexOfFirstTask = indexOfLastTask - tasksPerPage;
-  const currentTasks = filteredTasks.slice(indexOfFirstTask, indexOfLastTask);
-  const totalPages = Math.ceil(filteredTasks.length / tasksPerPage);
+  const currentTasks = sortedTasks.slice(indexOfFirstTask, indexOfLastTask);
+  const totalPages = Math.ceil(sortedTasks.length / tasksPerPage);
 
   // Pagination logic for backup tasks
   const indexOfLastBackupTask = currentBackupPage * tasksPerPage;
@@ -243,6 +504,11 @@ export const TasksTable: React.FC = () => {
   
       await set(taskRef, newTask);
       
+      // Auto-assign if no agent was specified and auto-assign is enabled
+      if (isAdmin && automationSettings.autoAssignTasks && !newTask.agentId) {
+        await autoAssignTask(newTask.id);
+      }
+      
       setTasks(prev => [newTask, ...prev]);
       setIsAddingTask(false);
       toast.success('Task added successfully');
@@ -303,6 +569,8 @@ export const TasksTable: React.FC = () => {
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
       case 'completed':
         return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+      case 'overdue':
+        return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300';
       default:
         return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
     }
@@ -332,11 +600,11 @@ export const TasksTable: React.FC = () => {
         <div className="text-sm text-muted-foreground">
           Showing {showBackup 
             ? (Math.min((currentBackupPage - 1) * tasksPerPage + 1, filteredBackupTasks.length)) 
-            : (Math.min((currentPage - 1) * tasksPerPage + 1, filteredTasks.length))}-{
+            : (Math.min((currentPage - 1) * tasksPerPage + 1, sortedTasks.length))}-{
             showBackup 
               ? Math.min(currentBackupPage * tasksPerPage, filteredBackupTasks.length) 
-              : Math.min(currentPage * tasksPerPage, filteredTasks.length)
-          } of {showBackup ? filteredBackupTasks.length : filteredTasks.length} tasks
+              : Math.min(currentPage * tasksPerPage, sortedTasks.length)
+          } of {showBackup ? filteredBackupTasks.length : sortedTasks.length} tasks
         </div>
         <div className="flex items-center space-x-2">
           <Button
@@ -418,16 +686,181 @@ export const TasksTable: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
-        <h2 className="text-xl font-semibold">{showBackup ? 'Deleted Tasks Backup' : 'Tasks'}</h2>
-        <Input
-          placeholder="Search tasks..."
-          className="neuro-inset focus:shadow-none w-full sm:w-[300px]"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
+      {/* Automation Settings Dialog */}
+      <Dialog open={showAutomationSettings} onOpenChange={setShowAutomationSettings}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Task Automation Settings</DialogTitle>
+            <DialogDescription>
+              Configure automated task management features
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="autoStatusUpdate"
+                  checked={automationSettings.autoStatusUpdate}
+                  onCheckedChange={(checked) => setAutomationSettings({
+                    ...automationSettings,
+                    autoStatusUpdate: Boolean(checked)
+                  })}
+                />
+                <label htmlFor="autoStatusUpdate" className="text-sm font-medium leading-none">
+                  Auto-update Task Statuses
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Automatically updates task statuses (e.g., to overdue when past due date)
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="autoAssignTasks"
+                  checked={automationSettings.autoAssignTasks}
+                  onCheckedChange={(checked) => setAutomationSettings({
+                    ...automationSettings,
+                    autoAssignTasks: Boolean(checked)
+                  })}
+                />
+                <label htmlFor="autoAssignTasks" className="text-sm font-medium leading-none">
+                  Auto-assign New Tasks
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Automatically assigns new tasks to the least busy agent
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="notifyOverdue"
+                  checked={automationSettings.notifyOverdue}
+                  onCheckedChange={(checked) => setAutomationSettings({
+                    ...automationSettings,
+                    notifyOverdue: Boolean(checked)
+                  })}
+                />
+                <label htmlFor="notifyOverdue" className="text-sm font-medium leading-none">
+                  Notify About Overdue Tasks
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Create notifications when tasks become overdue
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="notifyDueSoon"
+                  checked={automationSettings.notifyDueSoon}
+                  onCheckedChange={(checked) => setAutomationSettings({
+                    ...automationSettings,
+                    notifyDueSoon: Boolean(checked)
+                  })}
+                />
+                <label htmlFor="notifyDueSoon" className="text-sm font-medium leading-none">
+                  Notify About Tasks Due Soon
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Create notifications for tasks due within 24 hours
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Label htmlFor="autoCleanupDays" className="text-sm font-medium leading-none">
+                  Auto-cleanup Completed Tasks After:
+                </Label>
+                <Input
+                  id="autoCleanupDays"
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={automationSettings.autoCleanupDays}
+                  onChange={(e) => setAutomationSettings({
+                    ...automationSettings,
+                    autoCleanupDays: Number(e.target.value)
+                  })}
+                  className="w-20"
+                />
+                <span className="text-sm">days</span>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Automatically archive completed tasks older than this period
+              </p>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button 
+              onClick={() => setShowAutomationSettings(false)}
+              className="neuro hover:shadow-none transition-all duration-300"
+            >
+              Save Settings
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Task Statistics Panel */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="neuro p-3 rounded-lg">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium">Total Tasks</span>
+            <span className="text-lg font-bold">{taskStats.total}</span>
+          </div>
+        </div>
+        <div className="neuro p-3 rounded-lg">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium">Completed</span>
+            <span className="text-lg font-bold text-green-500">{taskStats.completed}</span>
+          </div>
+        </div>
+        <div className="neuro p-3 rounded-lg">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium">In Progress</span>
+            <span className="text-lg font-bold text-blue-500">{taskStats.inProgress}</span>
+          </div>
+        </div>
+        <div className="neuro p-3 rounded-lg">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium">Overdue</span>
+            <span className="text-lg font-bold text-red-500">{taskStats.overdue}</span>
+          </div>
+        </div>
       </div>
 
+      {/* Search and Actions Bar */}
+      <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center mb-4">
+        <h2 className="text-xl font-semibold">{showBackup ? 'Deleted Tasks Backup' : 'Tasks'}</h2>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Input
+            placeholder="Search tasks..."
+            className="neuro-inset focus:shadow-none w-full sm:w-[300px]"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {isAdmin && (
+            <Button 
+              variant="outline"
+              size="icon"
+              onClick={() => setShowAutomationSettings(true)}
+              className="neuro hover:shadow-none transition-all duration-300"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Backup/Active Tasks Toggle */}
       <div className="flex justify-between mb-4">
         <Button 
           variant={showBackup ? "outline" : "default"}

@@ -98,6 +98,7 @@ export const SignupForm: React.FC = () => {
         leadLimit,
         agentLimit,
         emailVerified: false,
+        status:'active',
         createdAt: new Date().toISOString()
       });
 

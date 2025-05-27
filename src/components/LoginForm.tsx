@@ -350,6 +350,20 @@ export const LoginForm: React.FC = () => {
                     'Login as Admin'
                   )}
                 </Button>
+                <div className="space-y-2 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Don't have an account?{' '}
+                    <Link to="/signup" className="text-pulse hover:underline">
+                      Sign up
+                    </Link>
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Forgot your password?{' '}
+                    <Link to="/forgot-password" className="text-pulse hover:underline">
+                      Reset it here
+                    </Link>
+                  </p>
+                </div>
               </motion.form>
             </TabsContent>
             
@@ -410,6 +424,20 @@ export const LoginForm: React.FC = () => {
                     'Login as Agent'
                   )}
                 </Button>
+                <div className="space-y-2 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Don't have an account?{' '}
+                    <Link to="/signup" className="text-pulse hover:underline">
+                      Sign up
+                    </Link>
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Forgot your password?{' '}
+                    <Link to="/forgot-password" className="text-pulse hover:underline">
+                      Reset it here
+                    </Link>
+                  </p>
+                </div>
               </motion.form>
             </TabsContent>
           </Tabs>
