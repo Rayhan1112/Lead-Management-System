@@ -11,54 +11,68 @@ import { ref, push, set, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
-interface RealEstateLead {
+interface LeadDetails {
   id?: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
+  RA?: string;
+  Date?: string;
+  Meeting_Date?: string;
+  Meeting_Time?: string;
+  Meeting_Status?: string;
+  linkedin_url?: string;
+  first_name?: string;
+  last_name?: string;
   company?: string;
-  propertyType: 'residential' | 'commercial' | 'land' | 'rental';
-  budget: string;
-  location: string;
-  bedrooms?: string;
-  bathrooms?: string;
-  squareFootage?: string;
-  timeline: 'immediately' | '1-3 months' | '3-6 months' | '6+ months';
-  source: 'website' | 'referral' | 'social' | 'ad' | 'open house' | 'other';
-  status: 'new' | 'contacted' | 'viewing scheduled' | 'offer made' | 'negotiation' | 'closed';
-  notes: string;
-  preferredContactMethod: 'phone' | 'email' | 'text';
-  createdAt: string;
-  updatedAt: string;
+  Industry?: string;
+  Employee_Size?: string;
+  job_title?: string;
+  Email_ID?: string;
+  Mobile_Number?: string;
+  Linkedin_R?: string;
+  Email_R?: string;
+  Mobile_R?: string;
+  Whatsapp_R?: string;
+  Comment?: string;
+  RPC_link?: string;
+  Meeting_Takeaway?: string;
+  Website?: string;
+  Requirement?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-interface LeadFormProps {
+interface LeadDetailsFormProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (lead: RealEstateLead) => void;
-  lead?: RealEstateLead;
+  onSubmit: (lead: LeadDetails) => void;
+  lead?: LeadDetails;
 }
 
-export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, lead }) => {
+export const LeadForm: React.FC<LeadDetailsFormProps> = ({ isOpen, onClose, onSubmit, lead }) => {
   const currentUser = localStorage.getItem('adminkey');
-  const [formData, setFormData] = useState<RealEstateLead>({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
+  const [formData, setFormData] = useState<LeadDetails>({
+    RA: '',
+    Date: format(new Date(), 'yyyy-MM-dd'),
+    Meeting_Date: '',
+    Meeting_Time: '',
+    Meeting_Status: '',
+    linkedin_url: '',
+    first_name: '',
+    last_name: '',
     company: '',
-    propertyType: 'residential',
-    budget: '',
-    location: '',
-    bedrooms: '',
-    bathrooms: '',
-    squareFootage: '',
-    timeline: '1-3 months',
-    source: 'website',
-    status: 'new',
-    notes: '',
-    preferredContactMethod: 'phone',
+    Industry: '',
+    Employee_Size: '',
+    job_title: '',
+    Email_ID: '',
+    Mobile_Number: '',
+    Linkedin_R: '',
+    Email_R: '',
+    Mobile_R: '',
+    Whatsapp_R: '',
+    Comment: '',
+    RPC_link: '',
+    Meeting_Takeaway: '',
+    Website: '',
+    Requirement: '',
     createdAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
     updatedAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
   });
@@ -76,22 +90,29 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
     } else {
       // Reset form when adding new lead
       setFormData({
-        firstName: '',
-        lastName: '',
-        email: '',
-        phone: '',
+        RA: '',
+        Date: format(new Date(), 'yyyy-MM-dd'),
+        Meeting_Date: '',
+        Meeting_Time: '',
+        Meeting_Status: '',
+        linkedin_url: '',
+        first_name: '',
+        last_name: '',
         company: '',
-        propertyType: 'residential',
-        budget: '',
-        location: '',
-        bedrooms: '',
-        bathrooms: '',
-        squareFootage: '',
-        timeline: '1-3 months',
-        source: 'website',
-        status: 'new',
-        notes: '',
-        preferredContactMethod: 'phone',
+        Industry: '',
+        Employee_Size: '',
+        job_title: '',
+        Email_ID: '',
+        Mobile_Number: '',
+        Linkedin_R: '',
+        Email_R: '',
+        Mobile_R: '',
+        Whatsapp_R: '',
+        Comment: '',
+        RPC_link: '',
+        Meeting_Takeaway: '',
+        Website: '',
+        Requirement: '',
         createdAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
         updatedAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       });
@@ -106,7 +127,7 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
     }));
   };
 
-  const handleSelectChange = (field: keyof RealEstateLead, value: string) => {
+  const handleSelectChange = (field: keyof LeadDetails, value: string) => {
     setFormData(prev => ({
       ...prev,
       [field]: value,
@@ -120,27 +141,51 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
       setError('User not authenticated');
       return;
     }
-
+  
     setIsSubmitting(true);
     setError('');
-
+  
     try {
+      // Prepare the data to be saved
+      const leadData = {
+        ...formData,
+        updatedAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+        // If it's a new lead, set createdAt
+        ...(!lead?.id && { createdAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss') })
+      };
+  
+      // Reference to the admin's leads in Firebase
+      const adminLeadsRef = ref(database, `users/${currentUser}/leads`);
+      
+      if (lead?.id) {
+        // Update existing lead
+        const leadRef = ref(database, `users/${currentUser}/leads/${lead.id}`);
+        await update(leadRef, leadData);
+        toast.success('Lead updated successfully!');
+      } else {
+        // Create new lead with push key
+        const newLeadRef = push(adminLeadsRef);
+        await set(newLeadRef, leadData);
+        toast.success('Lead created successfully!');
+      }
+  
       // Call the onSubmit prop with the form data
       onSubmit(formData);
       onClose();
     } catch (err) {
       console.error('Error saving lead:', err);
       setError('Failed to save lead. Please try again.');
-      } finally {
+      toast.error('Failed to save lead. Please try again.');
+    } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-2xl h-[90vh] flex flex-col neuro border-none">
+      <DialogContent className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-4xl h-[90vh] flex flex-col neuro border-none">
         <DialogHeader className="px-6 pt-6 pb-0 flex-none">
-          <DialogTitle>{lead ? 'Edit Lead' : 'Add New Lead'}</DialogTitle>
+          <DialogTitle>{lead ? 'Edit Lead Details' : 'Add New Lead Details'}</DialogTitle>
         </DialogHeader>
         
         <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -153,27 +198,26 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="firstName">First Name*</Label>
+                <Label htmlFor="RA">RA</Label>
                 <Input
-                  id="firstName"
-                  name="firstName"
+                  id="RA"
+                  name="RA"
                   className="neuro-inset focus:shadow-none"
-                  value={formData.firstName}
+                  value={formData.RA}
                   onChange={handleChange}
-                  required
                   disabled={isSubmitting}
                 />
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="lastName">Last Name*</Label>
+                <Label htmlFor="Date">Date</Label>
                 <Input
-                  id="lastName"
-                  name="lastName"
+                  id="Date"
+                  name="Date"
+                  type="date"
                   className="neuro-inset focus:shadow-none"
-                  value={formData.lastName}
+                  value={formData.Date}
                   onChange={handleChange}
-                  required
                   disabled={isSubmitting}
                 />
               </div>
@@ -181,41 +225,165 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email*</Label>
+                <Label htmlFor="Meeting_Date">Meeting Date</Label>
                 <Input
-                  id="email"
-                  name="email"
-                  type="email"
+                  id="Meeting_Date"
+                  name="Meeting_Date"
+                  type="date"
                   className="neuro-inset focus:shadow-none"
-                  value={formData.email}
+                  value={formData.Meeting_Date}
                   onChange={handleChange}
-                  required
                   disabled={isSubmitting}
                 />
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="phone">Phone*</Label>
+                <Label htmlFor="Meeting_Time">Meeting Time</Label>
                 <Input
-                  id="phone"
-                  name="phone"
-                  type="tel"
+                  id="Meeting_Time"
+                  name="Meeting_Time"
+                  type="time"
                   className="neuro-inset focus:shadow-none"
-                  value={formData.phone}
+                  value={formData.Meeting_Time}
                   onChange={handleChange}
-                  required
                   disabled={isSubmitting}
                 />
               </div>
             </div>
-
+            
             <div className="space-y-2">
-              <Label htmlFor="company">Company</Label>
+              <Label htmlFor="Meeting_Status">Meeting Status</Label>
+              <Select 
+                value={formData.Meeting_Status || ''}
+                onValueChange={(value) => handleSelectChange('Meeting_Status', value)}
+                disabled={isSubmitting}
+              >
+                <SelectTrigger className="neuro-inset focus:shadow-none">
+                  <SelectValue placeholder="Select meeting status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Scheduled">Scheduled</SelectItem>
+                  <SelectItem value="Completed">Completed</SelectItem>
+                  <SelectItem value="Cancelled">Cancelled</SelectItem>
+                  <SelectItem value="Rescheduled">Rescheduled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="first_name">First Name</Label>
+                <Input
+                  id="first_name"
+                  name="first_name"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.first_name}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="last_name">Last Name</Label>
+                <Input
+                  id="last_name"
+                  name="last_name"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.last_name}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="company">Company</Label>
+                <Input
+                  id="company"
+                  name="company"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.company}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="Industry">Industry</Label>
+                <Input
+                  id="Industry"
+                  name="Industry"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.Industry}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="job_title">Job Title</Label>
+                <Input
+                  id="job_title"
+                  name="job_title"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.job_title}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="Employee_Size">Employee Size</Label>
+                <Input
+                  id="Employee_Size"
+                  name="Employee_Size"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.Employee_Size}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="Email_ID">Email</Label>
+                <Input
+                  id="Email_ID"
+                  name="Email_ID"
+                  type="email"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.Email_ID}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="Mobile_Number">Mobile Number</Label>
+                <Input
+                  id="Mobile_Number"
+                  name="Mobile_Number"
+                  type="tel"
+                  className="neuro-inset focus:shadow-none"
+                  value={formData.Mobile_Number}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="linkedin_url">LinkedIn URL</Label>
               <Input
-                id="company"
-                name="company"
+                id="linkedin_url"
+                name="linkedin_url"
+                type="url"
                 className="neuro-inset focus:shadow-none"
-                value={formData.company}
+                value={formData.linkedin_url}
                 onChange={handleChange}
                 disabled={isSubmitting}
               />
@@ -223,187 +391,140 @@ export const LeadForm: React.FC<LeadFormProps> = ({ isOpen, onClose, onSubmit, l
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="propertyType">Property Type*</Label>
+                <Label htmlFor="Linkedin_R">LinkedIn Response</Label>
                 <Select 
-                  value={formData.propertyType}
-                  onValueChange={(value) => handleSelectChange('propertyType', value)}
+                  value={formData.Linkedin_R || ''}
+                  onValueChange={(value) => handleSelectChange('Linkedin_R', value)}
                   disabled={isSubmitting}
                 >
                   <SelectTrigger className="neuro-inset focus:shadow-none">
-                    <SelectValue placeholder="Select property type" />
+                    <SelectValue placeholder="Select response" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="residential">Residential</SelectItem>
-                    <SelectItem value="commercial">Commercial</SelectItem>
-                    <SelectItem value="land">Land</SelectItem>
-                    <SelectItem value="rental">Rental</SelectItem>
+                    <SelectItem value="Positive">Positive</SelectItem>
+                    <SelectItem value="Negative">Negative</SelectItem>
+                    <SelectItem value="No Response">No Response</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="budget">Budget*</Label>
-                <Input
-                  id="budget"
-                  name="budget"
-                  type="text"
-                  className="neuro-inset focus:shadow-none"
-                  value={formData.budget}
-                  onChange={handleChange}
-                  required
+                <Label htmlFor="Email_R">Email Response</Label>
+                <Select 
+                  value={formData.Email_R || ''}
+                  onValueChange={(value) => handleSelectChange('Email_R', value)}
                   disabled={isSubmitting}
-                />
+                >
+                  <SelectTrigger className="neuro-inset focus:shadow-none">
+                    <SelectValue placeholder="Select response" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Positive">Positive</SelectItem>
+                    <SelectItem value="Negative">Negative</SelectItem>
+                    <SelectItem value="No Response">No Response</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="location">Preferred Location*</Label>
-                <Input
-                  id="location"
-                  name="location"
-                  className="neuro-inset focus:shadow-none"
-                  value={formData.location}
-                  onChange={handleChange}
-                  required
-                  disabled={isSubmitting}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="timeline">Purchase Timeline*</Label>
+                <Label htmlFor="Mobile_R">Mobile Response</Label>
                 <Select 
-                  value={formData.timeline}
-                  onValueChange={(value) => handleSelectChange('timeline', value)}
+                  value={formData.Mobile_R || ''}
+                  onValueChange={(value) => handleSelectChange('Mobile_R', value)}
                   disabled={isSubmitting}
                 >
                   <SelectTrigger className="neuro-inset focus:shadow-none">
-                    <SelectValue placeholder="Select timeline" />
+                    <SelectValue placeholder="Select response" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="immediately">Immediately</SelectItem>
-                    <SelectItem value="1-3 months">1-3 months</SelectItem>
-                    <SelectItem value="3-6 months">3-6 months</SelectItem>
-                    <SelectItem value="6+ months">6+ months</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="bedrooms">Bedrooms</Label>
-                <Input
-                  id="bedrooms"
-                  name="bedrooms"
-                  type="number"
-                  min="0"
-                  className="neuro-inset focus:shadow-none"
-                  value={formData.bedrooms}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="bathrooms">Bathrooms</Label>
-                <Input
-                  id="bathrooms"
-                  name="bathrooms"
-                  type="number"
-                  min="0"
-                  className="neuro-inset focus:shadow-none"
-                  value={formData.bathrooms}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="squareFootage">Square Footage</Label>
-                <Input
-                  id="squareFootage"
-                  name="squareFootage"
-                  type="number"
-                  min="0"
-                  className="neuro-inset focus:shadow-none"
-                  value={formData.squareFootage}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="source">Lead Source*</Label>
-                <Select 
-                  value={formData.source}
-                  onValueChange={(value) => handleSelectChange('source', value)}
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger className="neuro-inset focus:shadow-none">
-                    <SelectValue placeholder="Select source" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="website">Website</SelectItem>
-                    <SelectItem value="referral">Referral</SelectItem>
-                    <SelectItem value="social">Social Media</SelectItem>
-                    <SelectItem value="ad">Advertisement</SelectItem>
-                    <SelectItem value="open house">Open House</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    <SelectItem value="Positive">Positive</SelectItem>
+                    <SelectItem value="Negative">Negative</SelectItem>
+                    <SelectItem value="No Response">No Response</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="preferredContactMethod">Contact Preference*</Label>
+                <Label htmlFor="Whatsapp_R">WhatsApp Response</Label>
                 <Select 
-                  value={formData.preferredContactMethod}
-                  onValueChange={(value) => handleSelectChange('preferredContactMethod', value)}
+                  value={formData.Whatsapp_R || ''}
+                  onValueChange={(value) => handleSelectChange('Whatsapp_R', value)}
                   disabled={isSubmitting}
                 >
                   <SelectTrigger className="neuro-inset focus:shadow-none">
-                    <SelectValue placeholder="Select preference" />
+                    <SelectValue placeholder="Select response" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="phone">Phone Call</SelectItem>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="text">Text Message</SelectItem>
+                    <SelectItem value="Positive">Positive</SelectItem>
+                    <SelectItem value="Negative">Negative</SelectItem>
+                    <SelectItem value="No Response">No Response</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="status">Lead Status</Label>
-              <Select 
-                value={formData.status}
-                onValueChange={(value) => handleSelectChange('status', value)}
+              <Label htmlFor="Website">Website</Label>
+              <Input
+                id="Website"
+                name="Website"
+                type="url"
+                className="neuro-inset focus:shadow-none"
+                value={formData.Website}
+                onChange={handleChange}
                 disabled={isSubmitting}
-              >
-                <SelectTrigger className="neuro-inset focus:shadow-none">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="new">New Lead</SelectItem>
-                  <SelectItem value="contacted">Contacted</SelectItem>
-                  <SelectItem value="viewing scheduled">Viewing Scheduled</SelectItem>
-                  <SelectItem value="offer made">Offer Made</SelectItem>
-                  <SelectItem value="negotiation">In Negotiation</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                </SelectContent>
-              </Select>
+              />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="notes">Notes & Preferences</Label>
+              <Label htmlFor="RPC_link">RPC Link</Label>
+              <Input
+                id="RPC_link"
+                name="RPC_link"
+                type="url"
+                className="neuro-inset focus:shadow-none"
+                value={formData.RPC_link}
+                onChange={handleChange}
+                disabled={isSubmitting}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="Requirement">Requirement</Label>
               <Textarea
-                id="notes"
-                name="notes"
+                id="Requirement"
+                name="Requirement"
+                className="neuro-inset focus:shadow-none"
+                rows={2}
+                value={formData.Requirement}
+                onChange={handleChange}
+                disabled={isSubmitting}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="Meeting_Takeaway">Meeting Takeaway</Label>
+              <Textarea
+                id="Meeting_Takeaway"
+                name="Meeting_Takeaway"
+                className="neuro-inset focus:shadow-none"
+                rows={2}
+                value={formData.Meeting_Takeaway}
+                onChange={handleChange}
+                disabled={isSubmitting}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="Comment">Comment</Label>
+              <Textarea
+                id="Comment"
+                name="Comment"
                 className="neuro-inset focus:shadow-none"
                 rows={3}
-                value={formData.notes}
+                value={formData.Comment}
                 onChange={handleChange}
                 disabled={isSubmitting}
               />

@@ -28,29 +28,71 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '
 import PlanModal from '@/pages/PlanModel';
 
 interface Lead {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
+  RA?: string;
+  Date?: string;
+  Meeting_Date?: string;
+  Meeting_Time?: string;
+  Meeting_Status?: string;
+  linkedin_url?: string;
+  first_name?: string;
+  last_name?: string;
   company?: string;
-  propertyType: string;
-  budget: string;
-  location: string;
-  bedrooms?: string;
-  bathrooms?: string;
-  squareFootage?: string;
-  timeline: string;
-  source: string;
-  status: string;
-  notes: string;
-  preferredContactMethod: string;
+  Industry?: string;
+  Employee_Size?: string;
+  job_title?: string;
+  Email_ID?: string;
+  Mobile_Number?: string;
+  Linkedin_R?: string;
+  Email_R?: string;
+  Mobile_R?: string;
+  Whatsapp_R?: string;
+  Comment?: string;
+  RPC_link?: string;
+  Meeting_Takeaway?: string;
+  Website?: string;
+  Requirement?: string;
   createdAt: string;
   updatedAt: string;
   leadNumber?: number;
   scheduledCall?: string;
   isDeleted?: boolean;
   deletedAt?: string;
+}
+
+interface LeadDetailsProps {
+  lead: {
+    id: string;
+    RA?: string;
+    Date?: string;
+    Meeting_Date?: string;
+    Meeting_Time?: string;
+    Meeting_Status?: string;
+    linkedin_url?: string;
+    first_name?: string;
+    last_name?: string;
+    company?: string;
+    Industry?: string;
+    Employee_Size?: string;
+    job_title?: string;
+    Email_ID?: string;
+    Mobile_Number?: string;
+    Linkedin_R?: string;
+    Email_R?: string;
+    Mobile_R?: string;
+    Whatsapp_R?: string;
+    Comment?: string;
+    RPC_link?: string;
+    Meeting_Takeaway?: string;
+    Website?: string;
+    Requirement?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  };
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSchedule?: () => void;
+  isMobile?: boolean;
 }
 
 export const LeadsTable: React.FC = () => {
@@ -75,6 +117,8 @@ export const LeadsTable: React.FC = () => {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [showAddLeadButton, setShowAddLeadButton] = useState(true);
   const [showBackupLeads, setShowBackupLeads] = useState(false);
+   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
   
   // Bulk selection state
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
@@ -227,11 +271,11 @@ export const LeadsTable: React.FC = () => {
   const filteredLeads = showBackupLeads 
     ? deletedLeads.filter(lead => {
         const searchFields = [
-          lead.firstName?.toLowerCase(),
-          lead.lastName?.toLowerCase(),
-          lead.email?.toLowerCase(),
+          lead.first_name?.toLowerCase(),
+          lead.last_name?.toLowerCase(),
+          lead.Email_R?.toLowerCase(),
           lead.company?.toLowerCase(),
-          lead.phone?.toLowerCase()
+          lead.Mobile_Number
         ].join(' ');
 
         const matchesSearch = searchFields.includes(searchTerm.toLowerCase());
@@ -243,11 +287,11 @@ export const LeadsTable: React.FC = () => {
       })
     : leads.filter(lead => {
         const searchFields = [
-          lead.firstName?.toLowerCase(),
-          lead.lastName?.toLowerCase(),
-          lead.email?.toLowerCase(),
+          lead.first_name?.toLowerCase(),
+          lead.last_name?.toLowerCase(),
+          lead.Email_ID?.toLowerCase(),
           lead.company?.toLowerCase(),
-          lead.phone?.toLowerCase()
+          lead.Mobile_Number
         ].join(' ');
 
         const matchesSearch = searchFields.includes(searchTerm.toLowerCase());
@@ -286,6 +330,20 @@ export const LeadsTable: React.FC = () => {
         ? prev.filter(id => id !== leadId) 
         : [...prev, leadId]
     );
+  };
+ const permanentDeleteLead = async (leadId: string) => {
+    if (!adminId) return;
+
+    try {
+      const leadRef = ref(database, `users/${adminId}/deletedLeads/${leadId}`);
+      await remove(leadRef);
+      toast.success('Lead permanently deleted');
+      setShowDeleteConfirm(false);
+      setLeadToDelete(null);
+    } catch (error) {
+      toast.error('Failed to permanently delete lead');
+      console.error('Error deleting lead:', error);
+    }
   };
 
   // Soft delete a lead (move to backup)
@@ -369,8 +427,7 @@ export const LeadsTable: React.FC = () => {
       console.error('Error updating leads:', error);
     }
   };
-
-  const handleBulkDelete = async () => {
+const handleBulkDelete = async () => {
     if (!adminId || selectedLeads.length === 0 || !window.confirm(`Are you sure you want to delete ${selectedLeads.length} leads?`)) return;
 
     try {
@@ -390,6 +447,41 @@ export const LeadsTable: React.FC = () => {
     } catch (error) {
       toast.error('Failed to delete leads');
       console.error('Error deleting leads:', error);
+    }
+  };
+  const handlePermanentDelete = async (id: string) => {
+    if (!adminId || !window.confirm('Are you sure you want to permanently delete this lead? This action cannot be undone.')) return;
+    await permanentDeleteLead(id);
+    
+    if (selectedLead?.id === id) {
+      setSelectedLead(null);
+    }
+    
+    // Reset to first page if the current page would be empty after deletion
+    if (currentLeads.length === 1 && currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+   const handleBulkPermanentDelete = async () => {
+    if (!adminId || selectedLeads.length === 0 || !window.confirm(`Are you sure you want to permanently delete ${selectedLeads.length} leads? This action cannot be undone.`)) return;
+
+    try {
+      const deletePromises = selectedLeads.map(leadId => 
+        permanentDeleteLead(leadId)
+      );
+
+      await Promise.all(deletePromises);
+      toast.success(`${selectedLeads.length} leads permanently deleted`);
+      setSelectedLeads([]);
+      setIsSelectAll(false);
+      
+      // Reset to first page if current page would be empty
+      if (currentLeads.length === selectedLeads.length && currentPage > 1) {
+        setCurrentPage(currentPage - 1);
+      }
+    } catch (error) {
+      toast.error('Failed to permanently delete leads');
+      console.error('Error permanently deleting leads:', error);
     }
   };
 
@@ -572,10 +664,10 @@ export const LeadsTable: React.FC = () => {
     try {
       // Prepare the data for export
       const exportData = filteredLeads.map(lead => ({
-        'First Name': lead.firstName,
-        'Last Name': lead.lastName,
-        'Email': lead.email,
-        'Phone': lead.phone,
+        'First Name': lead.first_name,
+        'Last Name': lead.last_name,
+        'Email': lead.Email_ID,
+        'Phone': lead.Mobile_Number,
         'Company': lead.company || '',
         'Property Type': lead.propertyType,
         'Budget': lead.budget,
@@ -730,6 +822,14 @@ export const LeadsTable: React.FC = () => {
     setSelectedSource(null);
     setCurrentPage(1); // Reset to first page when filters are reset
   };
+  const excelSerialDateToString = (serial: number): string => {
+    const excelEpoch = new Date(1900, 0, 1);
+    const date = new Date(excelEpoch.getTime() + (serial - 1) * 24 * 60 * 60 * 1000);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
 
   const applyFilters = () => {
     setCurrentPage(1); // Reset to first page when filters are applied
@@ -760,23 +860,34 @@ export const LeadsTable: React.FC = () => {
   const validateExcelData = (data: any[]): {
     isValid: boolean;
     missingFields: string[];
-    validData: Omit<Lead, 'id'>[];
+    validData: any[];
   } => {
     const requiredFields = [
-      'firstName',
-      'lastName',
-      'email',
-      'phone',
-      'propertyType',
-      'budget',
-      'location',
-      'timeline',
-      'source',
-      'status',
-      'notes',
-      'preferredContactMethod'
+      'RA',
+      'Date',
+      'Meeting_Date',
+      'Meeting_Time',
+      'Meeting_Status',
+      'linkedin_url',
+      'first_name',
+      'last_name',
+      'company',
+      'Industry',
+      'Employee_Size',
+      'job_title',
+      'Email_ID',
+      'Mobile_Number',
+      'Linkedin_R ',
+      'Email_R',
+      'Mobile_R',
+      'Whatsapp_R',
+      'Comment',
+      'RPC_link',
+      'Meeting_Takeaway',
+      'Website',
+      'Requirement'
     ];
-
+  
     if (data.length === 0) {
       return {
         isValid: false,
@@ -784,10 +895,10 @@ export const LeadsTable: React.FC = () => {
         validData: []
       };
     }
-
+  
     const firstRow = data[0];
     const missingFields = requiredFields.filter(field => !(field in firstRow));
-
+  
     if (missingFields.length > 0) {
       return {
         isValid: false,
@@ -795,37 +906,45 @@ export const LeadsTable: React.FC = () => {
         validData: []
       };
     }
-
+  
     const validData = data.map(row => ({
-      firstName: row.firstName,
-      lastName: row.lastName,
-      email: row.email,
-      phone: row.phone,
-      company: row.company || '',
-      propertyType: row.propertyType,
-      budget: row.budget,
-      location: row.location,
-      bedrooms: row.bedrooms || '',
-      bathrooms: row.bathrooms || '',
-      squareFootage: row.squareFootage || '',
-      timeline: row.timeline,
-      source: row.source,
-      status: row.status,
-      notes: row.notes,
-      preferredContactMethod: row.preferredContactMethod,
-      leadNumber: row.leadNumber || 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      RA: row['RA'],
+      Date: typeof row['Date'] === 'number'
+      ? excelSerialDateToString(row['Date'])
+      : row['Date'],     
+       Meeting_Date: typeof row['Meeting_Date'] === 'number'
+        ? excelSerialDateToString(row['Meeting_Date'])
+        : row['Meeting_Date'],
+      Meeting_Time: row['Meeting_Time'],
+      Meeting_Status: row['Meeting_Status'],
+      linkedin_url: row['linkedin_url'],
+      first_name: row['first_name'],
+      last_name: row['last_name'],
+      company: row['company'],
+      Industry: row['Industry'],
+      Employee_Size: row['Employee_Size'],
+      job_title: row['job_title'],
+      Email_ID: row['Email_ID'],
+      Mobile_Number: row['Mobile_Number'],
+      Linkedin_R: row['Linkedin_R '],
+      Email_R: row['Email_R'],
+      Mobile_R: row['Mobile_R'],
+      Whatsapp_R: row['Whatsapp_R'],
+      Comment: row['Comment'],
+      RPC_link: row['RPC_link'],
+      Meeting_Takeaway: row['Meeting_Takeaway'],
+      Website: row['Website'],
+      Requirement: row['Requirement']
     }));
-
+  
     return {
       isValid: true,
       missingFields: [],
       validData
     };
   };
-
-  const allStatuses = Array.from(new Set([...leads, ...deletedLeads].map(lead => lead.status)));
+  
+  const allStatuses = Array.from(new Set([...leads, ...deletedLeads].map(lead => lead.Meeting_Status)));
   const allSources = Array.from(new Set([...leads, ...deletedLeads].map(lead => lead.source)));
 
   return (
@@ -882,15 +1001,26 @@ export const LeadsTable: React.FC = () => {
             )}
             
             {showBackupLeads ? (
-              <Button 
-                variant="default" 
-                size="sm" 
-                onClick={handleBulkRestore}
-                className="flex items-center gap-2"
-              >
-                <RotateCw className="h-4 w-4" />
-                Restore
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  onClick={handleBulkRestore}
+                  className="flex items-center gap-2"
+                >
+                  <RotateCw className="h-4 w-4" />
+                  Restore
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  size="sm" 
+                  onClick={handleBulkPermanentDelete}
+                  className="flex items-center gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete Permanently
+                </Button>
+              </div>
             ) : (
               <Button 
                 variant="destructive" 
@@ -941,8 +1071,8 @@ export const LeadsTable: React.FC = () => {
             <p className="text-xs text-muted-foreground capitalize">{status}</p>
             <p className="text-xl font-bold">
               {showBackupLeads 
-                ? deletedLeads.filter(lead => lead.status === status).length
-                : leads.filter(lead => lead.status === status).length}
+                ? deletedLeads.filter(lead => lead.Meeting_Status === status).length
+                : leads.filter(lead => lead.Meeting_Status === status).length}
             </p>
           </div>
         ))}
@@ -1081,7 +1211,7 @@ export const LeadsTable: React.FC = () => {
                 />
               </th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Name</th>
-              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Phone</th>
+              <th className="text-left p-3 text-sm font-medium text-muted-foreground">Mobile</th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Status</th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">Source</th>
               <th className="text-left p-3 text-sm font-medium text-muted-foreground">
@@ -1106,8 +1236,8 @@ export const LeadsTable: React.FC = () => {
                 <td className="p-3">
                   <div className="flex items-center">
                     <div>
-                      <p className="font-medium">{lead.firstName} {lead.lastName}</p>
-                      <p className="text-sm text-muted-foreground">{lead.email}</p>
+                      <p className="font-medium">{lead.first_name} {lead.last_name}</p>
+                      <p className="text-sm text-muted-foreground">{lead.Email_ID}</p>
                       {lead.scheduledCall && !showBackupLeads && (
                         <div className="flex items-center mt-1 text-xs text-blue-600">
                           <Clock className="h-3 w-3 mr-1" />
@@ -1124,17 +1254,17 @@ export const LeadsTable: React.FC = () => {
                     <ChevronRight className="ml-2 h-4 w-4 text-muted-foreground" />
                   </div>
                 </td>
-                <td className="p-3">{lead.phone}</td>
+                <td className="p-3">{lead.Mobile_Number}</td>
                 <td className="p-3">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
-                    lead.status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
-                    lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
-                    lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
-                    lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
+                    lead.Meeting_Status === 'new' ? 'bg-blue-100 text-blue-800' :
+                    lead.Meeting_Status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
+                    lead.Meeting_Status === 'qualified' ? 'bg-green-100 text-green-800' :
+                    lead.Meeting_Status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
+                    lead.Meeting_Status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
                     'bg-gray-100 text-gray-800'
                   }`}>
-                    {lead.status}
+                    {lead.Meeting_Status}
                   </span>
                 </td>
                 <td className="p-3 capitalize">{lead.source}</td>
@@ -1205,17 +1335,30 @@ export const LeadsTable: React.FC = () => {
                       <Edit className="h-4 w-4" />
                     </Button>
                     {showBackupLeads ? (
-                      <Button 
-                        variant="ghost" 
-                        size="icon"
-                        className="h-8 w-8 text-green-600 hover:text-green-700"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRestore(lead.id);
-                        }}
-                      >
-                        <RotateCw className="h-4 w-4" />
-                      </Button>
+                      <>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 text-green-600 hover:text-green-700"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRestore(lead.id);
+                          }}
+                        >
+                          <RotateCw className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:text-red-600"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePermanentDelete(lead.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
                     ) : (
                       <Button 
                         variant="ghost" 
@@ -1263,8 +1406,8 @@ export const LeadsTable: React.FC = () => {
             
             <div className="flex justify-between items-start">
               <div>
-                <h3 className="font-medium">{lead.firstName} {lead.lastName}</h3>
-                <p className="text-sm text-muted-foreground">{lead.email}</p>
+                <h3 className="font-medium">{lead.first_name} {lead.last_name}</h3>
+                <p className="text-sm text-muted-foreground">{lead.Email_ID}</p>
                 <p className="text-sm mt-1">{lead.company}</p>
                 {!showBackupLeads && lead.scheduledCall && (
                   <div className="flex items-center mt-1 text-xs text-blue-600">
@@ -1280,14 +1423,14 @@ export const LeadsTable: React.FC = () => {
                 )}
               </div>
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
-                lead.status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
-                lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
-                lead.status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
-                lead.status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
+                lead.Meeting_Status === 'new' ? 'bg-blue-100 text-blue-800' :
+                lead.Meeting_Status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
+                lead.Meeting_Status === 'qualified' ? 'bg-green-100 text-green-800' :
+                lead.Meeting_Status === 'proposal' ? 'bg-indigo-100 text-indigo-800' :
+                lead.Meeting_Status === 'negotiation' ? 'bg-purple-100 text-purple-800' :
                 'bg-gray-100 text-gray-800'
               }`}>
-                {lead.status}
+                {lead.Meeting_Status}
               </span>
             </div>
             
@@ -1364,17 +1507,30 @@ export const LeadsTable: React.FC = () => {
                     <Edit className="h-4 w-4" />
                   </Button>
                   {showBackupLeads ? (
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="h-8 w-8 text-green-600 hover:text-green-700"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRestore(lead.id);
-                      }}
-                    >
-                      <RotateCw className="h-4 w-4" />
-                    </Button>
+                    <>
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        className="h-8 w-8 text-green-600 hover:text-green-700"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRestore(lead.id);
+                        }}
+                      >
+                        <RotateCw className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        className="h-8 w-8 text-red-500 hover:text-red-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePermanentDelete(lead.id);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
                   ) : (
                     <Button 
                       variant="ghost" 
@@ -1466,14 +1622,24 @@ export const LeadsTable: React.FC = () => {
             )}
             
             {showBackupLeads ? (
-              <Button 
-                variant="default" 
-                size="sm" 
-                onClick={handleBulkRestore}
-                className="h-10 px-3"
-              >
-                <RotateCw className="h-4 w-4" />
-              </Button>
+              <>
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  onClick={handleBulkRestore}
+                  className="h-10 px-3"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  size="sm" 
+                  onClick={handleBulkPermanentDelete}
+                  className="h-10 px-3"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
             ) : (
               <Button 
                 variant="destructive" 
@@ -1518,7 +1684,7 @@ export const LeadsTable: React.FC = () => {
                         setEditingLead(selectedLead);
                       }}
                       onDelete={() => {
-                        handleDelete(selectedLead.id);
+                        showBackupLeads ? handlePermanentDelete(selectedLead.id) : handleDelete(selectedLead.id);
                         setSelectedLead(null);
                       }}
                       onRestore={showBackupLeads ? () => {
@@ -1554,17 +1720,30 @@ export const LeadsTable: React.FC = () => {
                         </Button>
                       )}
                       {showBackupLeads ? (
-                        <Button 
-                          variant="default" 
-                          className="flex-1"
-                          onClick={() => {
-                            handleRestore(selectedLead.id);
-                            setSelectedLead(null);
-                          }}
-                        >
-                          <RotateCw className="h-4 w-4 mr-2" />
-                          Restore
-                        </Button>
+                        <>
+                          <Button 
+                            variant="default" 
+                            className="flex-1"
+                            onClick={() => {
+                              handleRestore(selectedLead.id);
+                              setSelectedLead(null);
+                            }}
+                          >
+                            <RotateCw className="h-4 w-4 mr-2" />
+                            Restore
+                          </Button>
+                          <Button 
+                            variant="destructive" 
+                            className="flex-1"
+                            onClick={() => {
+                              handlePermanentDelete(selectedLead.id);
+                              setSelectedLead(null);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </Button>
+                        </>
                       ) : (
                         <Button 
                           variant="destructive" 
@@ -1597,7 +1776,7 @@ export const LeadsTable: React.FC = () => {
                     setEditingLead(selectedLead);
                   }}
                   onDelete={() => {
-                    handleDelete(selectedLead.id);
+                    showBackupLeads ? handlePermanentDelete(selectedLead.id) : handleDelete(selectedLead.id);
                     setSelectedLead(null);
                   }}
                   onRestore={showBackupLeads ? () => {
