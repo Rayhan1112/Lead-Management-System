@@ -61,7 +61,7 @@ interface Lead {
 
 interface LeadDetailsProps {
   lead: {
-    id: string;
+    id?: string;
     RA?: string;
     Date?: string;
     Meeting_Date?: string;
@@ -279,7 +279,7 @@ export const LeadsTable: React.FC = () => {
         ].join(' ');
 
         const matchesSearch = searchFields.includes(searchTerm.toLowerCase());
-        const matchesStatus = selectedStatus ? lead.status === selectedStatus : true;
+        const matchesStatus = selectedStatus ? lead.Meeting_Status === selectedStatus : true;
         const matchesSource = selectedSource && selectedSource !== 'all' 
           ? lead.source === selectedSource 
           : true;    
@@ -295,7 +295,7 @@ export const LeadsTable: React.FC = () => {
         ].join(' ');
 
         const matchesSearch = searchFields.includes(searchTerm.toLowerCase());
-        const matchesStatus = selectedStatus ? lead.status === selectedStatus : true;
+        const matchesStatus = selectedStatus ? lead.Meeting_Status === selectedStatus : true;
         const matchesSource = selectedSource && selectedSource !== 'all' 
           ? lead.source === selectedSource 
           : true;    
@@ -662,31 +662,37 @@ const handleBulkDelete = async () => {
 
   const handleExport = () => {
     try {
-      // Prepare the data for export
+      // Prepare the data for export using LeadDetails interface
       const exportData = filteredLeads.map(lead => ({
-        'First Name': lead.first_name,
-        'Last Name': lead.last_name,
-        'Email': lead.Email_ID,
-        'Phone': lead.Mobile_Number,
+        'First Name': lead.first_name || '',
+        'Last Name': lead.last_name || '',
+        'Email': lead.Email_ID || '',
+        'Phone': lead.Mobile_Number || '',
         'Company': lead.company || '',
-        'Property Type': lead.propertyType,
-        'Budget': lead.budget,
-        'Location': lead.location,
-        'Bedrooms': lead.bedrooms || '',
-        'Bathrooms': lead.bathrooms || '',
-        'Square Footage': lead.squareFootage || '',
-        'Timeline': lead.timeline,
-        'Source': lead.source,
-        'Status': lead.status,
-        'Notes': lead.notes,
-        'Preferred Contact Method': lead.preferredContactMethod,
-        'Created At': new Date(lead.createdAt).toLocaleString(),
-        'Scheduled Call': lead.scheduledCall 
-          ? new Date(lead.scheduledCall).toLocaleString() 
+        'Industry': lead.Industry || '',
+        'Employee Size': lead.Employee_Size || '',
+        'Job Title': lead.job_title || '',
+        'LinkedIn URL': lead.linkedin_url || '',
+        'LinkedIn Response': lead.Linkedin_R || '',
+        'Email Response': lead.Email_R || '',
+        'Mobile Response': lead.Mobile_R || '',
+        'WhatsApp Response': lead.Whatsapp_R || '',
+        'Meeting Date': lead.Meeting_Date || '',
+        'Meeting Time': lead.Meeting_Time || '',
+        'Meeting Status': lead.Meeting_Status || '',
+        'Meeting Takeaway': lead.Meeting_Takeaway || '',
+        'Requirement': lead.Requirement || '',
+        'Comment': lead.Comment || '',
+        'RPC Link': lead.RPC_link || '',
+        'Website': lead.Website || '',
+        'Created At': lead.createdAt 
+          ? new Date(lead.createdAt).toLocaleString() 
           : '',
-        'Deleted At': lead.deletedAt 
-          ? new Date(lead.deletedAt).toLocaleString() 
-          : ''
+        'Updated At': lead.updatedAt 
+          ? new Date(lead.updatedAt).toLocaleString() 
+          : '',
+        'RA': lead.RA || '',
+        'Date': lead.Date || ''
       }));
   
       // Create worksheet
@@ -708,7 +714,6 @@ const handleBulkDelete = async () => {
       toast.error('Failed to export leads');
     }
   };
-
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;

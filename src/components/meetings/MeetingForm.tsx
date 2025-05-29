@@ -37,9 +37,9 @@ interface Meeting {
 
 interface Lead {
   id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
+  first_name: string;
+  last_name: string;
+  Email_ID: string;
 }
 
 interface MeetingFormProps {
@@ -968,7 +968,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
                             onCheckedChange={() => { }}
                           />
                           <label htmlFor={`lead-${lead.id}`} className="text-sm cursor-pointer">
-                            {lead.firstName} {lead.lastName} ({lead.email})
+                            {lead.first_name} {lead.last_name} ({lead.Email_ID})
                           </label>
                         </div>
                       ))
@@ -982,7 +982,7 @@ export const MeetingForm: React.FC<MeetingFormProps> = ({ isOpen, onClose, onSub
                 <div className="text-xs text-muted-foreground mt-1">
                   Selected: {selectedLeads.map(id => {
                     const lead = availableLeads.find(l => l.id === id);
-                    return lead ? `${lead.firstName} ${lead.lastName}` : '';
+                    return lead ? `${lead.first_name} ${lead.last_name}` : '';
                   }).filter(Boolean).join(', ')}
                 </div>
               )}

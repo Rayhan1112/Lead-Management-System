@@ -28,13 +28,14 @@ interface Deal {
 
 interface Lead {
   id: string;
-  firstName: string;
-  lastName: string;
-  company: string;
-  email: string;
-  phone: string;
-  status: string;
+  first_name: string;
+  last_name: string;
+  Email_ID: string;
+  Company: string;
+  Mobile_Number: string;
+  Meeting_Status: string;
 }
+
 
 interface Agent {
   id: string;
@@ -167,9 +168,9 @@ export const DealForm: React.FC<DealFormProps> = ({
 
   const filteredLeads = leads.filter(lead => {
     return (
-      lead?.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead?.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead?.company?.toLowerCase().includes(searchTerm.toLowerCase())
+      lead?.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      lead?.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      lead?.Company?.toLowerCase().includes(searchTerm.toLowerCase())
     );
   });
 
@@ -191,8 +192,8 @@ export const DealForm: React.FC<DealFormProps> = ({
       if (selectedLead) {
         updatedData = {
           ...updatedData,
-          company: selectedLead.company,
-          leadName: `${selectedLead.firstName} ${selectedLead.lastName}`
+          company: selectedLead.Company,
+          leadName: `${selectedLead.first_name} ${selectedLead.last_name}`
         };
       }
     }
@@ -310,7 +311,7 @@ export const DealForm: React.FC<DealFormProps> = ({
                       {filteredLeads.length > 0 ? (
                         filteredLeads.map(lead => (
                           <SelectItem key={lead.id} value={lead.id}>
-                            {lead.firstName} {lead.lastName} ({lead.email})
+                            {lead.first_name} {lead.last_name} ({lead.Email_ID})
                           </SelectItem>
                         ))
                       ) : (

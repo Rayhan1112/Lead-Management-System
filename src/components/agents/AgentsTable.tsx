@@ -8,7 +8,7 @@ import { AgentForm } from './AgentForm';
 import { ref, onValue, update, remove } from 'firebase/database';
 import { database } from '../../firebase';
 
-export const AgentsTable: React.FC = () => {
+export const AgxtsTable: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isAddingAgent, setIsAddingAgent] = useState(false);

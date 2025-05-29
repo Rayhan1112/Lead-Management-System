@@ -342,14 +342,14 @@ export const AgentCards: React.FC = () => {
         return false;
       }
 
-      // Encrypt the updated agent data
-      const encryptedAgent = await encryptObject({
+      // Prepare the agent data with update timestamp
+      const agentData = {
         ...updatedAgent,
         lastUpdated: new Date().toISOString()
-      });
+      };
 
       const agentRef = ref(database, `users/${adminKey}/agents/${updatedAgent.id}`);
-      await update(agentRef, encryptedAgent);
+      await update(agentRef, agentData);
 
       // Log the agent update activity
       await logAgentActivity({
@@ -459,8 +459,8 @@ export const AgentCards: React.FC = () => {
                   <p className="text-sm text-muted-foreground">{agent.email}</p>
                   <p className="text-sm text-muted-foreground">{agent.phone}</p>
                   <br/>
-                  <p className="text-sm text-white">Last Login:<p className='text-red-500'>{agent.lastLogin}</p> </p>
-                  <p className="text-sm text-white">Last Logout:<p className='text-red-500'>{agent.logoutTime}</p> </p>
+                  <p className="text-sm text-black dark:text-white">Last Login:<p className='text-red-500'>{agent.lastLogin}</p> </p>
+                  <p className="text-sm text-black dark:text-white">Last Logout:<p className='text-red-500'>{agent.logoutTime}</p> </p>
                 </div>
 
                 {agent.assignedLeads && (
